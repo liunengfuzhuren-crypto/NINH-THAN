@@ -1,0 +1,1929 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>宁晨公司 NINH THAN CTY — 榴莲加工厂管理系统</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🥭</text></svg>">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: 'Noto Sans SC', 'PingFang SC', -apple-system, BlinkMacSystemFont, sans-serif; }
+  #root { min-height: 100vh; }
+  #loading { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; background: linear-gradient(135deg, #1B4332 0%, #2D6A4F 40%, #40916C 100%); color: #fff; font-family: sans-serif; }
+  #loading .spinner { width: 40px; height: 40px; border: 3px solid rgba(255,255,255,0.2); border-top-color: #fff; border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 20px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div id="root">
+  <div id="loading">
+    <div class="spinner"></div>
+    <div style="font-size:36px;margin-bottom:12px;">🥭</div>
+    <div style="font-size:18px;font-weight:700;">宁晨公司 NINH THAN CTY</div>
+    <div style="font-size:12px;opacity:0.7;margin-top:6px;">系统加载中 Đang tải hệ thống...</div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+
+<script type="text/babel">
+const { useState, useEffect, useCallback, useRef } = React;
+
+const fmtVND = (v) => v == null ? "—" : new Intl.NumberFormat("vi-VN").format(Math.round(v)) + " ₫";
+const fmtKG = (v) => v != null ? v.toFixed(1) + " kg" : "—";
+const genId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+const today = () => new Date().toISOString().slice(0, 10);
+const todayVN = () => { const d = new Date(); return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`; };
+
+const ROLES = {
+  admin: { label: "管理员", level: 3, color: "#c0392b" },
+  manager: { label: "经理", level: 2, color: "#e67e22" },
+  operator: { label: "操作员", level: 1, color: "#2980b9" },
+  viewer: { label: "查看员", level: 0, color: "#7f8c8d" },
+};
+const GRADE_COLORS = { A: "#27ae60", B: "#2980b9", C: "#f39c12", D: "#e74c3c" };
+const DEFAULT_USERS = [
+  { id: "a1", username: "admin", password: "admin123", name: "系统管理员", role: "admin", active: true },
+  { id: "m1", username: "manager", password: "mgr123", name: "工厂经理", role: "manager", active: true },
+  { id: "o1", username: "operator", password: "op123", name: "操作员A", role: "operator", active: true },
+];
+
+const SK = { users:"df_u", purchases:"df_p", orchards:"df_o", batches:"df_b", containers:"df_c", staff:"df_s", chemicals:"df_ch", assets:"df_as", packaging:"df_pk", payments:"df_pay", salaryRecords:"df_sal", nitrogenRecords:"df_nito", session:"df_ss" };
+const load = (k, fb=[]) => { try { const d = localStorage.getItem(k); return d ? JSON.parse(d) : fb; } catch { return fb; } };
+const save = (k, d) => { try { localStorage.setItem(k, JSON.stringify(d)); } catch {} };
+
+// ── UI Components ──
+const Badge = ({ children, color = "#6c757d" }) => (
+  <span style={{ display:"inline-block", padding:"2px 10px", borderRadius:20, fontSize:11, fontWeight:600, color:"#fff", background:color, letterSpacing:0.3 }}>{children}</span>
+);
+const Btn = ({ children, onClick, variant="primary", size="md", disabled, style={}, icon }) => {
+  const cs = { primary:{bg:"#1B4332",h:"#2D6A4F",t:"#fff"}, secondary:{bg:"#e9ecef",h:"#dee2e6",t:"#333"}, danger:{bg:"#c0392b",h:"#e74c3c",t:"#fff"}, success:{bg:"#27ae60",h:"#2ecc71",t:"#fff"}, ghost:{bg:"transparent",h:"rgba(0,0,0,0.05)",t:"#555"} };
+  const c = cs[variant]||cs.primary;
+  const pd = size==="sm"?"5px 12px":size==="lg"?"12px 28px":"8px 20px";
+  const fs = size==="sm"?12:size==="lg"?15:13;
+  return <button onClick={onClick} disabled={disabled} style={{ display:"inline-flex",alignItems:"center",gap:6, padding:pd,fontSize:fs,fontWeight:600,border:"none",borderRadius:8,cursor:disabled?"not-allowed":"pointer", background:disabled?"#ccc":c.bg,color:disabled?"#888":c.t,transition:"all .15s",opacity:disabled?0.6:1,...style }} onMouseEnter={e=>!disabled&&(e.target.style.background=c.h)} onMouseLeave={e=>!disabled&&(e.target.style.background=c.bg)}>{icon&&<span style={{display:"flex"}}>{icon}</span>}{children}</button>;
+};
+const Input = ({ label, value, onChange, type="text", placeholder, required, disabled, style={}, options, suffix }) => (
+  <label style={{ display:"block", marginBottom:14, ...style }}>
+    {label && <span style={{ display:"block",fontSize:12,fontWeight:600,color:"#555",marginBottom:4 }}>{label}{required&&<span style={{color:"#e74c3c"}}> *</span>}</span>}
+    <div style={{position:"relative"}}>
+      {options ? <select value={value} onChange={e=>onChange(e.target.value)} disabled={disabled} style={{width:"100%",padding:"9px 12px",border:"1.5px solid #d5d8dc",borderRadius:8,fontSize:13,background:disabled?"#f5f5f5":"#fff",appearance:"none",cursor:"pointer",outline:"none",boxSizing:"border-box"}}><option value="">请选择...</option>{options.map(o=><option key={o.value??o} value={o.value??o}>{o.label??o}</option>)}</select>
+      : type==="textarea" ? <textarea value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} disabled={disabled} rows={3} style={{width:"100%",padding:"9px 12px",border:"1.5px solid #d5d8dc",borderRadius:8,fontSize:13,resize:"vertical",outline:"none",fontFamily:"inherit",boxSizing:"border-box"}} />
+      : <input type={type} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} required={required} disabled={disabled} style={{width:"100%",padding:"9px 12px",border:"1.5px solid #d5d8dc",borderRadius:8,fontSize:13,background:disabled?"#f5f5f5":"#fff",outline:"none",boxSizing:"border-box"}} />}
+      {suffix&&<span style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",fontSize:12,color:"#999"}}>{suffix}</span>}
+    </div>
+  </label>
+);
+const Card = ({ title, children, actions, style={} }) => (
+  <div style={{ background:"#fff",borderRadius:12,padding:"20px 24px",boxShadow:"0 1px 4px rgba(0,0,0,0.06)",border:"1px solid #eef0f2",marginBottom:16,...style }}>
+    {(title||actions)&&<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>{title&&<h3 style={{margin:0,fontSize:15,fontWeight:700,color:"#1B4332"}}>{title}</h3>}{actions&&<div style={{display:"flex",gap:8}}>{actions}</div>}</div>}
+    {children}
+  </div>
+);
+const StatCard = ({ label, value, sub, color="#1B4332" }) => (
+  <div style={{ background:"#fff",borderRadius:12,padding:"18px 20px",boxShadow:"0 1px 4px rgba(0,0,0,0.06)",border:"1px solid #eef0f2",flex:"1 1 200px",minWidth:170 }}>
+    <div style={{fontSize:11,color:"#888",fontWeight:600,textTransform:"uppercase",letterSpacing:0.5}}>{label}</div>
+    <div style={{fontSize:22,fontWeight:800,color,marginTop:4}}>{value}</div>
+    {sub&&<div style={{fontSize:11,color:"#999",marginTop:2}}>{sub}</div>}
+  </div>
+);
+const Modal = ({ title, onClose, children, width=560 }) => (
+  <div style={{position:"fixed",inset:0,zIndex:1000,background:"rgba(0,0,0,0.45)",display:"flex",justifyContent:"center",alignItems:"flex-start",paddingTop:60,overflowY:"auto"}} onClick={onClose}>
+    <div style={{background:"#fff",borderRadius:16,width:"90%",maxWidth:width,maxHeight:"85vh",overflow:"auto",padding:"28px 32px",boxShadow:"0 20px 60px rgba(0,0,0,0.2)",marginBottom:40}} onClick={e=>e.stopPropagation()}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+        <h2 style={{margin:0,fontSize:18,fontWeight:700,color:"#1B4332"}}>{title}</h2>
+        <button onClick={onClose} style={{background:"none",border:"none",cursor:"pointer",padding:4,fontSize:20}}>✕</button>
+      </div>
+      {children}
+    </div>
+  </div>
+);
+const Table = ({ columns, data, onRowClick, emptyText="暂无数据" }) => (
+  <div style={{overflowX:"auto"}}>
+    <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+      <thead><tr>{columns.map((c,i)=><th key={i} style={{textAlign:c.align||"left",padding:"10px 12px",borderBottom:"2px solid #e9ecef",fontSize:11,fontWeight:700,color:"#888",textTransform:"uppercase",letterSpacing:0.5,whiteSpace:"nowrap"}}>{c.title}</th>)}</tr></thead>
+      <tbody>
+        {data.length===0?<tr><td colSpan={columns.length} style={{padding:40,textAlign:"center",color:"#aaa"}}>{emptyText}</td></tr>
+        :data.map((row,ri)=><tr key={row.id||ri} onClick={()=>onRowClick?.(row)} style={{cursor:onRowClick?"pointer":"default",transition:"background .1s"}} onMouseEnter={e=>(e.currentTarget.style.background="#f8f9fa")} onMouseLeave={e=>(e.currentTarget.style.background="transparent")}>
+          {columns.map((c,ci)=><td key={ci} style={{padding:"10px 12px",borderBottom:"1px solid #f0f0f0",textAlign:c.align||"left",whiteSpace:c.nowrap?"nowrap":"normal"}}>{c.render?c.render(row[c.key],row,ri):row[c.key]}</td>)}
+        </tr>)}
+      </tbody>
+    </table>
+  </div>
+);
+const Tabs = ({ tabs, active, onChange }) => (
+  <div style={{display:"flex",gap:0,borderBottom:"2px solid #e9ecef",marginBottom:16}}>
+    {tabs.map(t=><button key={t.key} onClick={()=>onChange(t.key)} style={{padding:"10px 20px",fontSize:13,fontWeight:600,border:"none",borderBottom:active===t.key?"2px solid #1B4332":"2px solid transparent",color:active===t.key?"#1B4332":"#888",background:"none",cursor:"pointer",marginBottom:-2,transition:"all .15s"}}>{t.label}</button>)}
+  </div>
+);
+
+// ═══════════════════════════════════════════════════════
+// PRINT TEMPLATE - Matches the uploaded xlsx exactly
+// ═══════════════════════════════════════════════════════
+const PrintTemplate = ({ container, onClose }) => {
+  const printRef = useRef();
+  const c = container;
+  const items = c.items || [];
+  const totalBoxes = items.reduce((s,i) => s + (parseInt(i.qty)||0), 0);
+  const totalKG = items.reduce((s,i) => s + (parseInt(i.qty)||0) * (parseFloat(i.kgPerBox)||0), 0);
+
+  const handlePrint = () => {
+    const content = printRef.current.innerHTML;
+    const win = window.open('','_blank','width=900,height=700');
+    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>出库单 ${c.containerNo||''}</title>
+    <style>@page{size:A4 landscape;margin:10mm;}body{font-family:'Times New Roman',serif;margin:0;padding:15px;}
+    table{border-collapse:collapse;width:100%;}td,th{border:1px solid #000;padding:6px 8px;vertical-align:middle;font-size:13pt;}
+    .hdr{text-align:center;font-weight:bold;font-size:13pt;}.green-bg{background:#EAF1DD;}
+    .total-row{background:#FFFF00;color:#C00000;font-weight:bold;font-size:13pt;}
+    .title{text-align:center;font-weight:bold;font-size:14pt;border:1px solid #000;padding:8px;}
+    @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}}</style>
+    </head><body>${content}</body></html>`);
+    win.document.close();
+    setTimeout(()=>{win.print();}, 500);
+  };
+
+  return (
+    <Modal title="装车明细打印预览" onClose={onClose} width={860}>
+      <div ref={printRef}>
+        <table style={{borderCollapse:"collapse",width:"100%",fontFamily:"'Times New Roman',serif"}}>
+          <tbody>
+            {/* Row 1 - Title */}
+            <tr>
+              <td colSpan={6} style={{border:"1px solid #000",textAlign:"center",fontWeight:"bold",fontSize:14,padding:"8px"}}>
+                NINH THAN CTY / 宁晨公司 — PHIẾU XUẤT KHO 出库单 NGÀY {c.exportDate || todayVN()}
+              </td>
+            </tr>
+            {/* Row 2 - CONT / Truck head / Driver phone */}
+            <tr>
+              <td style={{border:"1px solid #000",fontWeight:"bold",fontSize:13,padding:"6px 8px"}}>CONT</td>
+              <td style={{border:"1px solid #000",fontWeight:"bold",fontSize:14,padding:"6px 8px"}}>{c.contSeq || ''}</td>
+              <td style={{border:"1px solid #000",fontWeight:"bold",fontSize:13,padding:"6px 8px"}}>Đầu xe 车头号</td>
+              <td style={{border:"1px solid #000",fontSize:13,padding:"6px 8px"}}>{c.truckHead || ''}</td>
+              <td style={{border:"1px solid #000",fontWeight:"bold",fontSize:13,padding:"6px 8px"}}>SDT TÀI XẾ 司机的电话:</td>
+              <td style={{border:"1px solid #000",fontSize:13,padding:"6px 8px"}}>{c.driverPhone || ''}</td>
+            </tr>
+            {/* Row 3 - Packaging code / Orchard code / Trailer / Border */}
+            <tr>
+              <td style={{border:"1px solid #000",fontWeight:"bold",fontSize:13,padding:"6px 8px",whiteSpace:"pre-line"}}>{"Mã đóng gói\n包装码\n"+(c.packagingCode||'VN-TGPH-761')}</td>
+              <td style={{border:"1px solid #000",fontWeight:"bold",fontSize:13,padding:"6px 8px",whiteSpace:"pre-line"}}>{"Mã vùng trồng\n果园码\n"+(c.orchardCode||'')}</td>
+              <td style={{border:"1px solid #000",fontWeight:"bold",fontSize:13,padding:"6px 8px"}}>Đuôi xe 车尾号</td>
+              <td style={{border:"1px solid #000",fontSize:13,padding:"6px 8px"}}>{c.truckTrailer || ''}</td>
+              <td style={{border:"1px solid #000",fontWeight:"bold",fontSize:13,padding:"6px 8px"}}>口岸: Nơi đến</td>
+              <td style={{border:"1px solid #000",fontSize:13,padding:"6px 8px"}}>{c.borderGate || 'Cửa khẩu hữu Nghị 友谊关'}</td>
+            </tr>
+            {/* Row 4 - Brand / Container No / Export date / Temperature */}
+            <tr>
+              <td style={{border:"1px solid #000",fontWeight:"bold",fontSize:13,padding:"6px 8px"}}>牌子{c.brand || ''}</td>
+              <td style={{border:"1px solid #000",fontWeight:"bold",fontSize:13,padding:"6px 8px"}}>Số cont 柜号</td>
+              <td style={{border:"1px solid #000",fontWeight:"bold",fontSize:13,padding:"6px 8px"}}>{c.containerNo || ''}</td>
+              <td style={{border:"1px solid #000",fontWeight:"bold",fontSize:13,padding:"6px 8px",whiteSpace:"pre-line"}}>{"NGÀY XUẤT CONT\n发柜日期"}</td>
+              <td style={{border:"1px solid #000",fontWeight:"bold",fontSize:13,padding:"6px 8px"}}>{c.exportDate || todayVN()}</td>
+              <td style={{border:"1px solid #000",fontWeight:"bold",fontSize:13,padding:"6px 8px",whiteSpace:"pre-line"}}>{"Nhiệt độ xuất phát\n温度: "+(c.temperature||'')}</td>
+            </tr>
+            {/* Row 5 - Column headers (green background) */}
+            <tr>
+              <td style={{border:"1px solid #000",background:"#EAF1DD",textAlign:"center",fontWeight:"bold",fontSize:13,padding:"6px 8px",whiteSpace:"pre-line"}}>{"STT\n序号"}</td>
+              <td style={{border:"1px solid #000",background:"#EAF1DD",textAlign:"center",fontWeight:"bold",fontSize:13,padding:"6px 8px",whiteSpace:"pre-line"}}>{"Loại\n级"}</td>
+              <td style={{border:"1px solid #000",background:"#EAF1DD",textAlign:"center",fontWeight:"bold",fontSize:13,padding:"6px 8px",whiteSpace:"pre-line"}}>{"Quy cách\n规格"}</td>
+              <td style={{border:"1px solid #000",background:"#EAF1DD",textAlign:"center",fontWeight:"bold",fontSize:13,padding:"6px 8px",whiteSpace:"pre-line"}}>{"Số lượng thùng\n箱子数量"}</td>
+              <td style={{border:"1px solid #000",background:"#EAF1DD",textAlign:"center",fontWeight:"bold",fontSize:13,padding:"6px 8px",whiteSpace:"pre-line"}}>{"Kg/Thùng\n公斤"}</td>
+              <td style={{border:"1px solid #000",background:"#EAF1DD",textAlign:"center",fontWeight:"bold",fontSize:13,padding:"6px 8px",whiteSpace:"pre-line"}}>{"Tổng số kg\n总公斤"}</td>
+            </tr>
+            {/* Data rows */}
+            {items.map((item, i) => (
+              <tr key={i}>
+                <td style={{border:"1px solid #000",textAlign:"center",fontSize:13,padding:"5px 8px"}}>{i+1}</td>
+                <td style={{border:"1px solid #000",fontSize:13,padding:"5px 8px"}}>{item.grade || ''}</td>
+                <td style={{border:"1px solid #000",fontSize:13,padding:"5px 8px"}}>{item.spec || ''}</td>
+                <td style={{border:"1px solid #000",textAlign:"center",fontSize:13,padding:"5px 8px"}}>{item.qty || ''}</td>
+                <td style={{border:"1px solid #000",textAlign:"center",fontSize:13,padding:"5px 8px"}}>{item.kgPerBox || ''}</td>
+                <td style={{border:"1px solid #000",textAlign:"center",fontSize:13,padding:"5px 8px",fontWeight:"bold"}}>{(parseInt(item.qty)||0)*(parseFloat(item.kgPerBox)||0) || ''}</td>
+              </tr>
+            ))}
+            {/* Add empty rows if less than 3 items for better appearance */}
+            {items.length < 3 && Array(3-items.length).fill(0).map((_,i)=>(
+              <tr key={"empty"+i}>
+                <td style={{border:"1px solid #000",padding:"5px 8px",height:22}}>&nbsp;</td>
+                <td style={{border:"1px solid #000",padding:"5px 8px"}}>&nbsp;</td>
+                <td style={{border:"1px solid #000",padding:"5px 8px"}}>&nbsp;</td>
+                <td style={{border:"1px solid #000",padding:"5px 8px"}}>&nbsp;</td>
+                <td style={{border:"1px solid #000",padding:"5px 8px"}}>&nbsp;</td>
+                <td style={{border:"1px solid #000",padding:"5px 8px"}}>&nbsp;</td>
+              </tr>
+            ))}
+            {/* Total row - yellow background, dark red text */}
+            <tr>
+              <td colSpan={3} style={{border:"1px solid #000",background:"#FFFF00",color:"#C00000",fontWeight:"bold",fontSize:13,padding:"8px"}}>TỔNG CỘNG 总共</td>
+              <td style={{border:"1px solid #000",background:"#FFFF00",color:"#C00000",fontWeight:"bold",fontSize:13,padding:"8px",textAlign:"center"}}>{totalBoxes}</td>
+              <td style={{border:"1px solid #000",background:"#FFFF00",padding:"8px"}}></td>
+              <td style={{border:"1px solid #000",background:"#FFFF00",color:"#C00000",fontWeight:"bold",fontSize:13,padding:"8px",textAlign:"center"}}>{totalKG}</td>
+            </tr>
+          </tbody>
+        </table>
+        <div style={{marginTop:12,textAlign:"right",fontSize:12,fontFamily:"'Times New Roman',serif",color:"#666"}}>
+          {c.printedBy || ''}
+        </div>
+      </div>
+      <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginTop:20}}>
+        <Btn variant="secondary" onClick={onClose}>关闭</Btn>
+        <Btn onClick={handlePrint}>🖨️ 打印出库单</Btn>
+      </div>
+    </Modal>
+  );
+};
+
+// ═══════════════════════════════════════════════════════
+// Container Module (装车管理) - with full template fields
+// ═══════════════════════════════════════════════════════
+const ContainerModule = ({ data, setData, role }) => {
+  const [showForm, setShowForm] = useState(false);
+  const [editItem, setEditItem] = useState(null);
+  const [showPrint, setShowPrint] = useState(null);
+  const canEdit = ROLES[role]?.level >= 1;
+
+  const emptyContainer = {
+    id:"", containerNo:"", contSeq:"", containerType:"45ft", brand:"",
+    truckHead:"", truckTrailer:"", driverPhone:"",
+    packagingCode:"VN-TGPH-761", orchardCode:"",
+    borderGate:"Cửa khẩu hữu Nghị 友谊关",
+    exportDate: todayVN(), temperature:"",
+    clientName:"", status:"preparing",
+    items:[], // {grade, spec, qty, kgPerBox}
+    loadingFee:3000000, processingRate:15000,
+    printedBy:"", notes:"",
+  };
+
+  const gradeOptions = [
+    {value:"Thai A 金枕", label:"Thai A 金枕"},
+    {value:"Thai B 金枕", label:"Thai B 金枕"},
+    {value:"Thai C 金枕 Chín···树熟", label:"Thai C 金枕 (树熟)"},
+    {value:"Musaking A 金枕", label:"Musaking A"},
+    {value:"Musaking B 金枕", label:"Musaking B"},
+  ];
+  const specOptions = [
+    {value:"3头黄色2条 vàng", label:"3头 黄色2条 vàng (A级)"},
+    {value:"4头黄色3条 vàng", label:"4头 黄色3条 vàng (A级)"},
+    {value:"6头黄色3条 vàng", label:"6头 黄色3条 vàng (A级)"},
+    {value:"3头白色2条 trắng", label:"3头 白色2条 trắng (B级)"},
+    {value:"4头白色3条 trắng", label:"4头 白色3条 trắng (B级)"},
+    {value:"5头红色4条 đỏ", label:"5头 红色4条 đỏ (C级)"},
+    {value:"6头红色3条 đỏ", label:"6头 红色3条 đỏ (C级)"},
+  ];
+  const kgOptions = [{value:"9",label:"9"},{value:"9.5",label:"9.5"},{value:"10",label:"10"},{value:"10.5",label:"10.5"},{value:"11",label:"11"},{value:"14",label:"14"},{value:"18",label:"18"}];
+
+  const openNew = () => { setEditItem({...emptyContainer, id:genId()}); setShowForm(true); };
+  const openEdit = (c) => { setEditItem(JSON.parse(JSON.stringify(c))); setShowForm(true); };
+
+  const addItem = () => {
+    setEditItem({...editItem, items:[...(editItem.items||[]), {grade:"Thai A 金枕",spec:"3头黄色2条 vàng",qty:"",kgPerBox:"10"}]});
+  };
+  const updateItem = (idx,field,val) => {
+    const items = [...editItem.items];
+    items[idx] = {...items[idx],[field]:val};
+    setEditItem({...editItem, items});
+  };
+  const removeItem = (idx) => {
+    setEditItem({...editItem, items: editItem.items.filter((_,i)=>i!==idx)});
+  };
+
+  const saveFn = () => {
+    const item = {...editItem};
+    const totalBoxes = (item.items||[]).reduce((s,i)=>s+(parseInt(i.qty)||0),0);
+    const totalKG = (item.items||[]).reduce((s,i)=>s+(parseInt(i.qty)||0)*(parseFloat(i.kgPerBox)||0),0);
+    item.totalBoxes = totalBoxes;
+    item.loadedWeight = totalKG;
+    item.processingFee = totalKG * 15000;
+    item.totalFee = item.processingFee + (item.loadingFee||3000000);
+    const list = [...data.containers];
+    const idx = list.findIndex(c=>c.id===item.id);
+    if(idx>=0) list[idx]=item; else list.push(item);
+    setData({...data, containers:list});
+    save(SK.containers, list);
+    setShowForm(false);
+  };
+
+  const removeFn = (id) => {
+    if(!confirm("确认删除？")) return;
+    const list = data.containers.filter(c=>c.id!==id);
+    setData({...data, containers:list});
+    save(SK.containers, list);
+  };
+
+  // Export all containers summary as printable page
+  const exportAllPrint = () => {
+    const cs = data.containers;
+    if(cs.length===0){alert("暂无装车数据可导出");return;}
+    const rows = cs.map((c,i)=>`<tr>
+      <td>${c.contSeq||i+1}</td><td>${c.containerNo||'—'}</td><td>${c.brand||''}</td>
+      <td>${c.clientName||''}</td><td>${c.exportDate||''}</td>
+      <td style="text-align:right">${c.totalBoxes||0}</td>
+      <td style="text-align:right">${(c.loadedWeight||0).toLocaleString()}</td>
+      <td style="text-align:right">${new Intl.NumberFormat('vi-VN').format((c.loadedWeight||0)*15000)} ₫</td>
+      <td style="text-align:right">3,000,000 ₫</td>
+      <td style="text-align:right;font-weight:bold">${new Intl.NumberFormat('vi-VN').format((c.loadedWeight||0)*15000+3000000)} ₫</td>
+    </tr>`).join('');
+    const totalW=cs.reduce((s,c)=>s+(c.loadedWeight||0),0);
+    const totalPF=totalW*15000;
+    const totalLF=cs.length*3000000;
+    const win=window.open('','_blank','width=1000,height=700');
+    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>装车汇总表</title>
+    <style>@page{size:A4 landscape;margin:10mm;}body{font-family:'Times New Roman',serif;padding:20px;}
+    table{border-collapse:collapse;width:100%;font-size:11pt;}td,th{border:1px solid #000;padding:5px 8px;}
+    th{background:#EAF1DD;font-weight:bold;}
+    .total{background:#FFFF00;color:#C00000;font-weight:bold;}
+    h2{text-align:center;margin-bottom:15px;}
+    @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}}</style>
+    </head><body>
+    <h2>宁晨公司 NINH THAN CTY — 装车明细汇总表 TỔNG HỢP XUẤT CONT</h2>
+    <table><thead><tr><th>序号</th><th>柜号</th><th>品牌</th><th>客户</th><th>日期</th><th>件数</th><th>重量(KG)</th><th>加工费</th><th>装车费</th><th>合计</th></tr></thead>
+    <tbody>${rows}
+    <tr class="total"><td colspan="5">TỔNG CỘNG 总计 (${cs.length} 柜)</td>
+    <td style="text-align:right">${cs.reduce((s,c)=>s+(c.totalBoxes||0),0)}</td>
+    <td style="text-align:right">${totalW.toLocaleString()}</td>
+    <td style="text-align:right">${new Intl.NumberFormat('vi-VN').format(totalPF)} ₫</td>
+    <td style="text-align:right">${new Intl.NumberFormat('vi-VN').format(totalLF)} ₫</td>
+    <td style="text-align:right">${new Intl.NumberFormat('vi-VN').format(totalPF+totalLF)} ₫</td></tr>
+    </tbody></table>
+    <p style="margin-top:20px;font-size:10pt;color:#666">导出时间: ${new Date().toLocaleString('zh-CN')}</p>
+    </body></html>`);
+    win.document.close();
+    setTimeout(()=>{win.print();},500);
+  };
+
+  // Export CSV
+  const exportCSV = () => {
+    const cs = data.containers;
+    if(cs.length===0){alert("暂无数据");return;}
+    const header="序号,柜号,品牌,客户,发柜日期,总件数,总重量KG,加工费VND,装车费VND,合计VND,状态\n";
+    const rows=cs.map((c,i)=>[
+      c.contSeq||i+1, c.containerNo||'', c.brand||'', c.clientName||'', c.exportDate||'',
+      c.totalBoxes||0, c.loadedWeight||0, (c.loadedWeight||0)*15000, 3000000,
+      (c.loadedWeight||0)*15000+3000000, c.status==="completed"?"已完成":c.status==="loading"?"装车中":"准备中"
+    ].join(",")).join("\n");
+    const BOM="\uFEFF";
+    const blob=new Blob([BOM+header+rows],{type:"text/csv;charset=utf-8"});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a");a.href=url;a.download=`装车明细_${today()}.csv`;a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+        <h2 style={{margin:0,fontSize:20,fontWeight:800,color:"#1B4332"}}>🚛 装车管理 / Quản lý xuất cont</h2>
+        <div style={{display:"flex",gap:8}}>
+          {data.containers.length>0&&<Btn variant="secondary" onClick={exportAllPrint}>📋 打印汇总</Btn>}
+          {data.containers.length>0&&<Btn variant="secondary" onClick={exportCSV}>📥 导出CSV</Btn>}
+          {canEdit && <Btn onClick={openNew}>+ 新建装车单</Btn>}
+        </div>
+      </div>
+      <div style={{display:"flex",gap:12,marginBottom:20,flexWrap:"wrap"}}>
+        <StatCard label="总装车数" value={data.containers.length} />
+        <StatCard label="总加工费收入" value={fmtVND(data.containers.reduce((s,c)=>s+((c.loadedWeight||0)*15000),0))} color="#27ae60" />
+        <StatCard label="装车费收入" value={fmtVND(data.containers.length*3000000)} color="#2980b9" />
+        <StatCard label="加工费标准" value="15,000₫/KG" sub="装车费 3,000,000₫/柜" />
+      </div>
+      <Card>
+        <Table
+          columns={[
+            {title:"序号",key:"contSeq",render:v=><strong>{v||"—"}</strong>},
+            {title:"柜号",key:"containerNo",render:v=><strong style={{fontFamily:"monospace"}}>{v||"—"}</strong>},
+            {title:"品牌",key:"brand"},
+            {title:"客户",key:"clientName"},
+            {title:"发柜日期",key:"exportDate",nowrap:true},
+            {title:"总件数",key:"totalBoxes",align:"right",render:v=><strong>{v||0}</strong>},
+            {title:"总重量(KG)",key:"loadedWeight",render:v=>v?v.toLocaleString():"—",align:"right"},
+            {title:"加工费",key:"loadedWeight",render:v=>fmtVND((v||0)*15000),align:"right"},
+            {title:"状态",key:"status",render:v=><Badge color={v==="completed"?"#27ae60":v==="loading"?"#f39c12":"#3498db"}>{v==="completed"?"已完成":v==="loading"?"装车中":"准备中"}</Badge>},
+            {title:"操作",key:"id",align:"center",render:(_,row)=>(
+              <div style={{display:"flex",gap:4,justifyContent:"center"}}>
+                {canEdit&&<Btn size="sm" variant="ghost" onClick={e=>{e.stopPropagation();openEdit(row);}}>编辑</Btn>}
+                <Btn size="sm" variant="secondary" onClick={e=>{e.stopPropagation();setShowPrint(row);}}>🖨️打印</Btn>
+                {canEdit&&<Btn size="sm" variant="danger" onClick={e=>{e.stopPropagation();removeFn(row.id);}}>删</Btn>}
+              </div>
+            )},
+          ]}
+          data={data.containers}
+        />
+      </Card>
+
+      {showForm && editItem && (
+        <Modal title={editItem.containerNo?"编辑装车单":"新建装车单 (出库单)"} onClose={()=>setShowForm(false)} width={780}>
+          <div style={{background:"#f0fdf4",borderRadius:8,padding:"12px 16px",marginBottom:16,fontSize:12,color:"#1B4332"}}>
+            <strong>出库单字段说明：</strong>按照 PHIẾU XUẤT KHO 模版，填写以下信息后可直接打印
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"0 16px"}}>
+            <Input label="CONT序号" value={editItem.contSeq} onChange={v=>setEditItem({...editItem,contSeq:v})} placeholder="1, 2, 3..." />
+            <Input label="柜号 Số cont" value={editItem.containerNo} onChange={v=>setEditItem({...editItem,containerNo:v})} required placeholder="CICU 7635273" />
+            <Input label="品牌 牌子" value={editItem.brand} onChange={v=>setEditItem({...editItem,brand:v})} placeholder="Huasheng / Chuhuafeng" />
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"0 16px"}}>
+            <Input label="车头号 Đầu xe" value={editItem.truckHead} onChange={v=>setEditItem({...editItem,truckHead:v})} placeholder="98H-02676" />
+            <Input label="车尾号 Đuôi xe" value={editItem.truckTrailer} onChange={v=>setEditItem({...editItem,truckTrailer:v})} placeholder="98R-02784" />
+            <Input label="司机电话 SDT" value={editItem.driverPhone} onChange={v=>setEditItem({...editItem,driverPhone:v})} placeholder="0984686292" />
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"0 16px"}}>
+            <Input label="包装码 Mã đóng gói" value={editItem.packagingCode} onChange={v=>setEditItem({...editItem,packagingCode:v})} placeholder="VN-TGPH-761" />
+            <Input label="果园码 Mã vùng trồng" value={editItem.orchardCode} onChange={v=>setEditItem({...editItem,orchardCode:v})} placeholder="VN-BPOR-0127" />
+            <Input label="口岸 Nơi đến" value={editItem.borderGate} onChange={v=>setEditItem({...editItem,borderGate:v})} />
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"0 16px"}}>
+            <Input label="发柜日期" value={editItem.exportDate} onChange={v=>setEditItem({...editItem,exportDate:v})} placeholder="dd/mm/yyyy" />
+            <Input label="温度 Nhiệt độ" value={editItem.temperature} onChange={v=>setEditItem({...editItem,temperature:v})} placeholder="-18℃" />
+            <Input label="客户名称" value={editItem.clientName} onChange={v=>setEditItem({...editItem,clientName:v})} />
+          </div>
+          <Input label="状态" value={editItem.status} onChange={v=>setEditItem({...editItem,status:v})}
+            options={[{value:"preparing",label:"准备中"},{value:"loading",label:"装车中"},{value:"completed",label:"已完成"}]} />
+
+          {/* Items table */}
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:16,marginBottom:8}}>
+            <span style={{fontSize:14,fontWeight:700,color:"#1B4332"}}>装箱明细 (Loại / Quy cách / Số lượng)</span>
+            <Btn size="sm" variant="secondary" onClick={addItem}>+ 添加行</Btn>
+          </div>
+          {(editItem.items||[]).map((item,i) => (
+            <div key={i} style={{display:"grid",gridTemplateColumns:"2fr 2fr 1fr 1fr 1fr auto",gap:8,alignItems:"end",marginBottom:6}}>
+              <Input label={i===0?"级 Loại":undefined} value={item.grade} onChange={v=>updateItem(i,"grade",v)}
+                options={gradeOptions} />
+              <Input label={i===0?"规格 Quy cách":undefined} value={item.spec} onChange={v=>updateItem(i,"spec",v)}
+                options={specOptions} />
+              <Input label={i===0?"箱数":undefined} type="number" value={item.qty} onChange={v=>updateItem(i,"qty",v)} placeholder="数量" />
+              <Input label={i===0?"KG/箱":undefined} value={item.kgPerBox} onChange={v=>updateItem(i,"kgPerBox",v)}
+                options={kgOptions} />
+              <div style={{fontSize:12,padding:"10px 0",color:"#666",fontWeight:700}}>
+                ={((parseInt(item.qty)||0)*(parseFloat(item.kgPerBox)||0)).toLocaleString()} kg
+              </div>
+              <button onClick={()=>removeItem(i)} style={{background:"none",border:"none",cursor:"pointer",padding:8,color:"#e74c3c",fontSize:16}}>✕</button>
+            </div>
+          ))}
+
+          {(editItem.items||[]).length>0 && (
+            <div style={{background:"#FFFFF0",border:"2px solid #f39c12",borderRadius:8,padding:14,marginTop:12}}>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,fontSize:13}}>
+                <div>总件数: <strong style={{color:"#C00000",fontSize:16}}>{(editItem.items||[]).reduce((s,i)=>s+(parseInt(i.qty)||0),0)}</strong></div>
+                <div>总重量: <strong style={{color:"#C00000",fontSize:16}}>{((editItem.items||[]).reduce((s,i)=>s+(parseInt(i.qty)||0)*(parseFloat(i.kgPerBox)||0),0)).toLocaleString()} KG</strong></div>
+                <div>加工费: <strong style={{color:"#27ae60"}}>{fmtVND((editItem.items||[]).reduce((s,i)=>s+(parseInt(i.qty)||0)*(parseFloat(i.kgPerBox)||0),0)*15000)}</strong></div>
+              </div>
+            </div>
+          )}
+
+          <Input label="制表人 / 签名" value={editItem.printedBy} onChange={v=>setEditItem({...editItem,printedBy:v})} style={{marginTop:12}} placeholder="如: TH-LƯƠNG" />
+          <Input label="备注" type="textarea" value={editItem.notes} onChange={v=>setEditItem({...editItem,notes:v})} />
+          <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginTop:16}}>
+            <Btn variant="secondary" onClick={()=>setShowForm(false)}>取消</Btn>
+            <Btn onClick={saveFn}>保存</Btn>
+          </div>
+        </Modal>
+      )}
+
+      {showPrint && <PrintTemplate container={showPrint} onClose={()=>setShowPrint(null)} />}
+    </div>
+  );
+};
+
+// ═══════════════════════════════════════════════════════
+// Dashboard Module
+// ═══════════════════════════════════════════════════════
+const DashboardModule = ({ data }) => {
+  const totalPurchaseKG = data.purchases.reduce((s,p)=>s+(p.netWeight||0),0);
+  const totalContainerRevenue = data.containers.reduce((s,c)=>s+((c.loadedWeight||0)*15000),0);
+  const gradeStats={A:0,B:0,C:0,D:0};
+  data.purchases.forEach(p=>{if(p.grades)Object.entries(p.grades).forEach(([g,w])=>{gradeStats[g]=(gradeStats[g]||0)+w;});});
+  const totalGraded=Object.values(gradeStats).reduce((a,b)=>a+b,0);
+  return (
+    <div>
+      <h2 style={{fontSize:20,fontWeight:800,color:"#1B4332",marginBottom:20}}>📊 工厂运营概览 Tổng quan hoạt động</h2>
+      <div style={{display:"flex",flexWrap:"wrap",gap:12,marginBottom:24}}>
+        <StatCard label="原料总入库" value={fmtKG(totalPurchaseKG)} sub={`采购 ${data.purchases.length} 批次`} />
+        <StatCard label="加工批次" value={data.batches.length} sub={`活跃 ${data.batches.filter(b=>b.status!=="completed").length}`} color="#2980b9" />
+        <StatCard label="装车/出柜" value={data.containers.length} sub={`加工费 ${fmtVND(totalContainerRevenue)}`} color="#27ae60" />
+        <StatCard label="果园合同" value={data.orchards.length} color="#8e44ad" />
+        <StatCard label="在岗人员" value={data.staff.filter(s=>s.active).length} color="#e67e22" />
+      </div>
+      {totalGraded>0 && <Card title="等级分布">
+        <div style={{display:"flex",height:28,borderRadius:8,overflow:"hidden",marginBottom:12}}>
+          {["A","B","C","D"].map(g=>{const pct=totalGraded>0?(gradeStats[g]/totalGraded)*100:0;return pct>0?<div key={g} style={{width:pct+"%",background:GRADE_COLORS[g],display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:11,fontWeight:700}}>{g} {pct.toFixed(0)}%</div>:null;})}
+        </div>
+      </Card>}
+      <Card title="最近装车">
+        <Table columns={[
+          {title:"序号",key:"contSeq",render:v=><strong>{v||"—"}</strong>},
+          {title:"柜号",key:"containerNo",render:v=><strong>{v}</strong>},
+          {title:"品牌",key:"brand"},
+          {title:"件数",key:"totalBoxes",align:"right"},
+          {title:"重量",key:"loadedWeight",render:v=>v?v.toLocaleString()+" kg":"—",align:"right"},
+          {title:"加工费",key:"loadedWeight",render:v=>fmtVND((v||0)*15000),align:"right"},
+          {title:"状态",key:"status",render:v=><Badge color={v==="completed"?"#27ae60":"#f39c12"}>{v==="completed"?"已完成":"进行中"}</Badge>},
+        ]} data={data.containers.slice(-8).reverse()} />
+      </Card>
+    </div>
+  );
+};
+
+// ═══════════════════════════════════════════════════════
+// Purchase Module - 收果管理 Quản lý thu mua (重构版)
+// 完全匹配收果账单实际结构
+// ═══════════════════════════════════════════════════════
+const PurchaseModule = ({ data, setData, role }) => {
+  const [showForm,setShowForm]=useState(false);
+  const [editItem,setEditItem]=useState(null);
+  const [tab,setTab]=useState("list");
+  const [filterClient,setFilterClient]=useState("all");
+  const [filterSource,setFilterSource]=useState("all");
+  const canEdit=ROLES[role]?.level>=1;
+
+  const empty={
+    id:"", date:today(),
+    // 基本信息
+    clientCode:"",     // 客户号: 姚总Dao / 金总Tống 等
+    sourceType:"vendor", // vendor=买手Lái / orchard=果园Vườn
+    supplierName:"",   // 买手/果园名 Lái bán
+    vehicleNo:"",      // 车号 Biển số xe
+    returnVehicle:"",  // 回厂车号
+    introducer:"",     // 介绍人 Người giới thiệu
+    variety:"Thai",    // 品种: Thai/Musaking
+    // 分级重量 (KG)
+    gradeA:"", gradeB:"", gradeC:"",
+    cop2:"",           // Cốp 2 (2算1)
+    gradeD:"",         // D果 Dạt đóng
+    gradeDMeat:"",     // 剥肉 Dạt lột
+    kem:"",            // 烂果 Kem
+    chinDong:"",       // 液氮熟果 Chín đóng
+    chinLot:"",        // 熟果剥肉 Chín lột
+    // 各等级单价 (VND/KG)
+    priceA:"", priceB:"", priceC:"",
+    priceCop2:"", priceD:"", priceDMeat:"",
+    priceKem:"", priceChinDong:"", priceChinLot:"",
+    // 结算
+    totalAmount:"",    // 金额 Thành tiền (自动计算)
+    actualPaid:"",     // 实际支付 Thực tế
+    depositDeduct:"",  // 押金抵扣 Trừ cọc
+    // 介绍费
+    commissionRate:"", // 介绍费单价 (如1000₫/kg)
+    commissionTotal:"",// 介绍费总额
+    notes:"",
+  };
+
+  const openNew=()=>{setEditItem({...empty,id:genId()});setShowForm(true);};
+  const openEdit=p=>{setEditItem({...p});setShowForm(true);};
+
+  // Auto-calculate totals
+  const calcTotal=(item)=>{
+    const n=(k)=>parseFloat(item[k])||0;
+    const totalKG = n("gradeA")+n("gradeB")+n("gradeC")+n("cop2")+n("gradeD")+n("gradeDMeat")+n("kem")+n("chinDong")+n("chinLot");
+    const amount = n("gradeA")*n("priceA") + n("gradeB")*n("priceB") + n("gradeC")*n("priceC")
+      + n("cop2")*n("priceCop2") + n("gradeD")*n("priceD") + n("gradeDMeat")*n("priceDMeat")
+      + n("kem")*n("priceKem") + n("chinDong")*n("priceChinDong") + n("chinLot")*n("priceChinLot");
+    const commTotal = totalKG * n("commissionRate");
+    const actualPaid = amount - n("depositDeduct");
+    return { totalKG, amount, commTotal, actualPaid };
+  };
+
+  const saveFn=()=>{
+    const item={...editItem};
+    const calc=calcTotal(item);
+    item.totalKG=calc.totalKG;
+    item.totalAmount=calc.amount;
+    item.commissionTotal=calc.commTotal;
+    if(!item.actualPaid) item.actualPaid=calc.actualPaid;
+    // Grades summary for dashboard compatibility
+    item.netWeight=calc.totalKG;
+    item.grades={A:parseFloat(item.gradeA)||0,B:parseFloat(item.gradeB)||0,C:parseFloat(item.gradeC)||0,D:(parseFloat(item.gradeD)||0)+(parseFloat(item.gradeDMeat)||0)};
+    item.totalCost=calc.amount;
+    item.source=item.sourceType;
+    const list=[...data.purchases];const idx=list.findIndex(p=>p.id===item.id);
+    if(idx>=0) list[idx]=item; else list.push(item);
+    setData({...data,purchases:list});save(SK.purchases,list);setShowForm(false);
+  };
+  const removeFn=id=>{if(!confirm("确认删除？Xác nhận xóa?"))return;const list=data.purchases.filter(p=>p.id!==id);setData({...data,purchases:list});save(SK.purchases,list);};
+
+  const purchases=data.purchases||[];
+  const clients=[...new Set(purchases.map(p=>p.clientCode).filter(Boolean))];
+  const filtered=purchases.filter(p=>{
+    if(filterClient!=="all"&&p.clientCode!==filterClient)return false;
+    if(filterSource!=="all"&&p.sourceType!==filterSource)return false;
+    return true;
+  });
+
+  const totalA=filtered.reduce((s,p)=>s+(parseFloat(p.gradeA)||0),0);
+  const totalB=filtered.reduce((s,p)=>s+(parseFloat(p.gradeB)||0),0);
+  const totalC=filtered.reduce((s,p)=>s+(parseFloat(p.gradeC)||0),0);
+  const totalD=filtered.reduce((s,p)=>s+(parseFloat(p.gradeD)||0)+(parseFloat(p.gradeDMeat)||0),0);
+  const totalKem=filtered.reduce((s,p)=>s+(parseFloat(p.kem)||0),0);
+  const totalAllKG=filtered.reduce((s,p)=>s+(p.totalKG||0),0);
+  const totalCost=filtered.reduce((s,p)=>s+(p.totalAmount||0),0);
+  const totalComm=filtered.reduce((s,p)=>s+(p.commissionTotal||0),0);
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+        <h2 style={{margin:0,fontSize:20,fontWeight:800,color:"#1B4332"}}>🛒 收果管理 Quản lý thu mua</h2>
+        {canEdit&&<Btn onClick={openNew}>+ 新增收果 Thêm phiếu mua</Btn>}
+      </div>
+
+      <div style={{display:"flex",gap:12,marginBottom:20,flexWrap:"wrap"}}>
+        <StatCard label="总收果量 Tổng KG" value={totalAllKG.toLocaleString()+" kg"} sub={`${filtered.length} 批次 lô`} />
+        <StatCard label="A级 Loại A" value={totalA.toLocaleString()+" kg"} color="#27ae60" />
+        <StatCard label="B级 Loại B" value={totalB.toLocaleString()+" kg"} color="#2980b9" />
+        <StatCard label="C级+D级" value={(totalC+totalD).toLocaleString()+" kg"} color="#f39c12" />
+        <StatCard label="烂果Kem" value={totalKem.toLocaleString()+" kg"} color="#e74c3c" />
+        <StatCard label="总金额 Tổng tiền" value={fmtVND(totalCost)} color="#8e44ad" />
+      </div>
+
+      <Tabs tabs={[{key:"list",label:"收果记录 DS thu mua"},{key:"summary",label:"客户汇总 TH khách"},{key:"commission",label:"介绍费 Hoa hồng"}]} active={tab} onChange={setTab} />
+
+      {tab==="list"&&<Card>
+        <div style={{display:"flex",gap:12,marginBottom:12,flexWrap:"wrap"}}>
+          <Input label="" value={filterClient} onChange={setFilterClient} options={[{value:"all",label:"全部客户 Tất cả"},...clients.map(c=>({value:c,label:c}))]} style={{marginBottom:0,minWidth:140}} />
+          <Input label="" value={filterSource} onChange={setFilterSource} options={[{value:"all",label:"全部来源"},{value:"vendor",label:"买手 Lái"},{value:"orchard",label:"果园 Vườn"}]} style={{marginBottom:0,minWidth:130}} />
+        </div>
+        <Table columns={[
+          {title:"日期 Ngày",key:"date",nowrap:true},
+          {title:"客户 Khách",key:"clientCode",render:v=><strong>{v||"—"}</strong>},
+          {title:"来源",key:"sourceType",render:v=><Badge color={v==="vendor"?"#3498db":"#27ae60"}>{v==="vendor"?"买手Lái":"果园Vườn"}</Badge>},
+          {title:"卖方 Người bán",key:"supplierName"},
+          {title:"车号 Xe",key:"vehicleNo",render:v=><span style={{fontFamily:"monospace",fontSize:11}}>{v||"—"}</span>},
+          {title:"A(kg)",key:"gradeA",align:"right",render:v=>v?parseFloat(v).toLocaleString():""},
+          {title:"B(kg)",key:"gradeB",align:"right",render:v=>v?parseFloat(v).toLocaleString():""},
+          {title:"C(kg)",key:"gradeC",align:"right",render:v=>v?parseFloat(v).toLocaleString():""},
+          {title:"D/剥肉",key:"gradeD",align:"right",render:(v,r)=>{const d=(parseFloat(v)||0)+(parseFloat(r.gradeDMeat)||0);return d?d.toLocaleString():"";}},
+          {title:"总量 Tổng",key:"totalKG",align:"right",render:v=><strong>{v?v.toLocaleString():""}</strong>},
+          {title:"金额 Tiền",key:"totalAmount",align:"right",render:v=>v?fmtVND(v):"—"},
+          {title:"操作",key:"id",align:"center",render:(_,row)=>canEdit?<div style={{display:"flex",gap:4,justifyContent:"center"}}><Btn size="sm" variant="ghost" onClick={e=>{e.stopPropagation();openEdit(row);}}>编辑</Btn><Btn size="sm" variant="danger" onClick={e=>{e.stopPropagation();removeFn(row.id);}}>删</Btn></div>:null},
+        ]} data={filtered} emptyText="暂无收果记录 Chưa có phiếu thu mua" />
+      </Card>}
+
+      {tab==="summary"&&<Card title="按客户汇总 Tổng hợp theo khách hàng">
+        <Table columns={[
+          {title:"客户 Khách",key:"client",render:v=><strong>{v}</strong>},
+          {title:"批次 Số lô",key:"count",align:"right"},
+          {title:"A(kg)",key:"a",align:"right",render:v=>v.toLocaleString()},
+          {title:"B(kg)",key:"b",align:"right",render:v=>v.toLocaleString()},
+          {title:"C(kg)",key:"c",align:"right",render:v=>v.toLocaleString()},
+          {title:"D(kg)",key:"d",align:"right",render:v=>v.toLocaleString()},
+          {title:"总量kg",key:"total",align:"right",render:v=><strong>{v.toLocaleString()}</strong>},
+          {title:"总金额",key:"amount",align:"right",render:v=><strong>{fmtVND(v)}</strong>},
+        ]} data={clients.map(c=>{
+          const ps=purchases.filter(p=>p.clientCode===c);
+          return {id:c,client:c,count:ps.length,
+            a:ps.reduce((s,p)=>s+(parseFloat(p.gradeA)||0),0),
+            b:ps.reduce((s,p)=>s+(parseFloat(p.gradeB)||0),0),
+            c:ps.reduce((s,p)=>s+(parseFloat(p.gradeC)||0),0),
+            d:ps.reduce((s,p)=>s+(parseFloat(p.gradeD)||0)+(parseFloat(p.gradeDMeat)||0),0),
+            total:ps.reduce((s,p)=>s+(p.totalKG||0),0),
+            amount:ps.reduce((s,p)=>s+(p.totalAmount||0),0),
+          };
+        })} />
+      </Card>}
+
+      {tab==="commission"&&<Card title="介绍费汇总 Tổng hợp hoa hồng">
+        <Table columns={[
+          {title:"日期",key:"date",nowrap:true},
+          {title:"卖方",key:"supplierName"},{title:"介绍人",key:"introducer"},
+          {title:"总量kg",key:"totalKG",align:"right",render:v=>v?v.toLocaleString():"—"},
+          {title:"费率₫/kg",key:"commissionRate",align:"right",render:v=>v?fmtVND(parseFloat(v)):"—"},
+          {title:"介绍费",key:"commissionTotal",align:"right",render:v=>v?<strong style={{color:"#e67e22"}}>{fmtVND(v)}</strong>:"—"},
+        ]} data={purchases.filter(p=>p.commissionTotal>0)} emptyText="暂无介绍费记录" />
+        {totalComm>0&&<div style={{textAlign:"right",marginTop:12,fontSize:15,fontWeight:800,color:"#e67e22"}}>介绍费合计: {fmtVND(totalComm)}</div>}
+      </Card>}
+
+      {/* ── 收果录入表单 ── */}
+      {showForm&&editItem&&(
+        <Modal title="收果录入 Phiếu thu mua" onClose={()=>setShowForm(false)} width={780}>
+          {/* 基本信息 */}
+          <div style={{fontSize:13,fontWeight:700,color:"#1B4332",marginBottom:8}}>基本信息 Thông tin cơ bản</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"0 16px"}}>
+            <Input label="日期 Ngày" type="date" value={editItem.date} onChange={v=>setEditItem({...editItem,date:v})} required />
+            <Input label="客户号 Mã khách" value={editItem.clientCode} onChange={v=>setEditItem({...editItem,clientCode:v})} required placeholder="姚总Dao / 金总Tống" />
+            <Input label="来源 Nguồn" value={editItem.sourceType} onChange={v=>setEditItem({...editItem,sourceType:v})}
+              options={[{value:"vendor",label:"买手 Lái"},{value:"orchard",label:"果园 Vườn"}]} />
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"0 16px"}}>
+            <Input label="卖方/果园名 Người bán" value={editItem.supplierName} onChange={v=>setEditItem({...editItem,supplierName:v})} required placeholder="Lê Thị Thu Thảo" />
+            <Input label="车号 Biển số xe" value={editItem.vehicleNo} onChange={v=>setEditItem({...editItem,vehicleNo:v})} placeholder="47C36032" />
+            <Input label="介绍人 Người giới thiệu" value={editItem.introducer} onChange={v=>setEditItem({...editItem,introducer:v})} placeholder="Tiến / Hổ / Mã" />
+          </div>
+          <Input label="品种 Giống" value={editItem.variety} onChange={v=>setEditItem({...editItem,variety:v})}
+            options={[{value:"Thai",label:"Thai 金枕"},{value:"Musaking",label:"Musaking 猫山王"}]} style={{maxWidth:250}} />
+
+          {/* 分级重量 + 单价 */}
+          <div style={{fontSize:13,fontWeight:700,color:"#1B4332",marginBottom:8,marginTop:12}}>分级重量(KG) & 单价(₫/KG) — Phân loại & Đơn giá</div>
+          <div style={{background:"#f8f9fa",borderRadius:10,padding:16,marginBottom:12}}>
+            <div style={{display:"grid",gridTemplateColumns:"120px 1fr 1fr",gap:"4px 12px",fontSize:12,alignItems:"center"}}>
+              <div style={{fontWeight:700,color:"#888"}}>等级 Loại</div>
+              <div style={{fontWeight:700,color:"#888",textAlign:"center"}}>重量KG Trọng lượng</div>
+              <div style={{fontWeight:700,color:"#888",textAlign:"center"}}>单价₫/KG Đơn giá</div>
+
+              <div><Badge color="#27ae60">A级 Nhất</Badge></div>
+              <Input label="" type="number" value={editItem.gradeA} onChange={v=>setEditItem({...editItem,gradeA:v})} suffix="kg" style={{marginBottom:4}} />
+              <Input label="" type="number" value={editItem.priceA} onChange={v=>setEditItem({...editItem,priceA:v})} suffix="₫" style={{marginBottom:4}} />
+
+              <div><Badge color="#2980b9">B级</Badge></div>
+              <Input label="" type="number" value={editItem.gradeB} onChange={v=>setEditItem({...editItem,gradeB:v})} suffix="kg" style={{marginBottom:4}} />
+              <Input label="" type="number" value={editItem.priceB} onChange={v=>setEditItem({...editItem,priceB:v})} suffix="₫" style={{marginBottom:4}} />
+
+              <div><Badge color="#f39c12">C级</Badge></div>
+              <Input label="" type="number" value={editItem.gradeC} onChange={v=>setEditItem({...editItem,gradeC:v})} suffix="kg" style={{marginBottom:4}} />
+              <Input label="" type="number" value={editItem.priceC} onChange={v=>setEditItem({...editItem,priceC:v})} suffix="₫" style={{marginBottom:4}} />
+
+              <div><span style={{fontSize:11,color:"#888"}}>Cốp2(2算1)</span></div>
+              <Input label="" type="number" value={editItem.cop2} onChange={v=>setEditItem({...editItem,cop2:v})} suffix="kg" style={{marginBottom:4}} />
+              <Input label="" type="number" value={editItem.priceCop2} onChange={v=>setEditItem({...editItem,priceCop2:v})} suffix="₫" style={{marginBottom:4}} />
+
+              <div><Badge color="#e74c3c">D果 Dạt đóng</Badge></div>
+              <Input label="" type="number" value={editItem.gradeD} onChange={v=>setEditItem({...editItem,gradeD:v})} suffix="kg" style={{marginBottom:4}} />
+              <Input label="" type="number" value={editItem.priceD} onChange={v=>setEditItem({...editItem,priceD:v})} suffix="₫" style={{marginBottom:4}} />
+
+              <div><span style={{fontSize:11,color:"#888"}}>剥肉 Dạt lột</span></div>
+              <Input label="" type="number" value={editItem.gradeDMeat} onChange={v=>setEditItem({...editItem,gradeDMeat:v})} suffix="kg" style={{marginBottom:4}} />
+              <Input label="" type="number" value={editItem.priceDMeat} onChange={v=>setEditItem({...editItem,priceDMeat:v})} suffix="₫" style={{marginBottom:4}} />
+
+              <div><span style={{fontSize:11,color:"#e74c3c"}}>烂果 Kem</span></div>
+              <Input label="" type="number" value={editItem.kem} onChange={v=>setEditItem({...editItem,kem:v})} suffix="kg" style={{marginBottom:4}} />
+              <Input label="" type="number" value={editItem.priceKem} onChange={v=>setEditItem({...editItem,priceKem:v})} suffix="₫" style={{marginBottom:4}} />
+
+              <div><span style={{fontSize:11,color:"#8e44ad"}}>液氮熟果 Chín đóng</span></div>
+              <Input label="" type="number" value={editItem.chinDong} onChange={v=>setEditItem({...editItem,chinDong:v})} suffix="kg" style={{marginBottom:4}} />
+              <Input label="" type="number" value={editItem.priceChinDong} onChange={v=>setEditItem({...editItem,priceChinDong:v})} suffix="₫" style={{marginBottom:4}} />
+
+              <div><span style={{fontSize:11,color:"#8e44ad"}}>熟果剥肉 Chín lột</span></div>
+              <Input label="" type="number" value={editItem.chinLot} onChange={v=>setEditItem({...editItem,chinLot:v})} suffix="kg" style={{marginBottom:4}} />
+              <Input label="" type="number" value={editItem.priceChinLot} onChange={v=>setEditItem({...editItem,priceChinLot:v})} suffix="₫" style={{marginBottom:4}} />
+            </div>
+          </div>
+
+          {/* 自动计算汇总 */}
+          {(()=>{const c=calcTotal(editItem);return c.totalKG>0?(
+            <div style={{background:"#FFFFF0",border:"2px solid #f39c12",borderRadius:8,padding:14,marginBottom:12}}>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,fontSize:13}}>
+                <div>总重量: <strong style={{color:"#C00000",fontSize:16}}>{c.totalKG.toLocaleString()} kg</strong></div>
+                <div>果款总额: <strong style={{color:"#C00000",fontSize:16}}>{fmtVND(c.amount)}</strong></div>
+                <div>介绍费: <strong style={{color:"#e67e22"}}>{fmtVND(c.commTotal)}</strong></div>
+              </div>
+            </div>
+          ):null;})()}
+
+          {/* 结算信息 */}
+          <div style={{fontSize:13,fontWeight:700,color:"#1B4332",marginBottom:8}}>结算 Thanh toán</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"0 16px"}}>
+            <Input label="押金抵扣 Trừ cọc" type="number" value={editItem.depositDeduct} onChange={v=>setEditItem({...editItem,depositDeduct:v})} suffix="₫" />
+            <Input label="实际支付 Thực tế" type="number" value={editItem.actualPaid} onChange={v=>setEditItem({...editItem,actualPaid:v})} suffix="₫" />
+            <Input label="介绍费率 Phí ₫/kg" type="number" value={editItem.commissionRate} onChange={v=>setEditItem({...editItem,commissionRate:v})} suffix="₫/kg" placeholder="1000" />
+          </div>
+          <Input label="备注 Ghi chú" type="textarea" value={editItem.notes} onChange={v=>setEditItem({...editItem,notes:v})} />
+          <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginTop:16}}>
+            <Btn variant="secondary" onClick={()=>setShowForm(false)}>取消 Hủy</Btn>
+            <Btn onClick={saveFn}>保存 Lưu</Btn>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+};
+
+// ═══════════════════════════════════════════════════════
+// Orchard Module (果园直采)
+// ═══════════════════════════════════════════════════════
+const OrchardModule = ({ data, setData, role }) => {
+  const [showForm,setShowForm]=useState(false);
+  const [editItem,setEditItem]=useState(null);
+  const [tab,setTab]=useState("contracts");
+  const isAdmin=role==="admin"; // Level 3 only sees all
+  const canEdit=isAdmin; // Only admin can edit orchard contracts
+  const empty={id:"",orchardName:"",farmerName:"",farmerPhone:"",location:"",contractDate:today(),estTotalKG:"",pricePerKG:"",depositRate:0.2,estGrades:{A:"",B:"",C:"",D:""},actualGrades:{A:"",B:"",C:"",D:""},actualTotalKG:"",status:"contracted",techStaff:"",notes:""};
+  const openNew=()=>{setEditItem({...empty,id:genId()});setShowForm(true);};
+  const openEdit=o=>{setEditItem(JSON.parse(JSON.stringify(o)));setShowForm(true);};
+  const saveFn=()=>{
+    const item={...editItem};item.estTotalKG=parseFloat(item.estTotalKG)||0;item.pricePerKG=parseFloat(item.pricePerKG)||0;
+    item.estTotalCost=item.estTotalKG*item.pricePerKG;item.depositAmount=item.estTotalCost*0.2;item.actualTotalKG=parseFloat(item.actualTotalKG)||0;
+    const egs={},ags={};["A","B","C","D"].forEach(g=>{egs[g]=parseFloat(item.estGrades[g])||0;ags[g]=parseFloat(item.actualGrades[g])||0;});
+    item.estGrades=egs;item.actualGrades=ags;
+    const list=[...data.orchards];const idx=list.findIndex(o=>o.id===item.id);if(idx>=0)list[idx]=item;else list.push(item);
+    setData({...data,orchards:list});save(SK.orchards,list);setShowForm(false);
+  };
+  const removeFn=id=>{if(!confirm("确认删除？"))return;const list=data.orchards.filter(o=>o.id!==id);setData({...data,orchards:list});save(SK.orchards,list);};
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+        <h2 style={{margin:0,fontSize:20,fontWeight:800,color:"#1B4332"}}>🌴 果园直采管理 Mua trực tiếp từ vườn</h2>
+        {canEdit&&<Btn onClick={openNew}>+ 新增果园合同 Thêm hợp đồng</Btn>}
+      </div>
+
+      {/* 权限提示 - 非管理员看到的提示 */}
+      {!isAdmin&&<div style={{background:"#FFF3E0",borderRadius:8,padding:"10px 16px",marginBottom:16,fontSize:12,color:"#E65100",display:"flex",alignItems:"center",gap:8}}>
+        🔒 <span>机密信息 Thông tin bảo mật — 您仅可查看果园名称和重量明细，价格/金额/合同信息仅管理员可见</span>
+      </div>}
+
+      {/* 统计卡片 - 管理员看全部，其余只看数量和重量 */}
+      <div style={{display:"flex",gap:12,marginBottom:20,flexWrap:"wrap"}}>
+        <StatCard label="合同果园 Số vườn" value={data.orchards.length} />
+        <StatCard label="预估总量 Tổng ước tính" value={fmtKG(data.orchards.reduce((s,o)=>s+(o.estTotalKG||0),0))} color="#2980b9" />
+        <StatCard label="实采总量 Tổng thực tế" value={fmtKG(data.orchards.reduce((s,o)=>s+(o.actualTotalKG||0),0))} color="#27ae60" />
+        {isAdmin&&<StatCard label="合同总额 Tổng HĐ" value={fmtVND(data.orchards.reduce((s,o)=>s+(o.estTotalCost||0),0))} color="#e74c3c" />}
+        {isAdmin&&<StatCard label="已付意向金 Đã cọc" value={fmtVND(data.orchards.reduce((s,o)=>s+(o.depositAmount||0),0))} color="#f39c12" />}
+      </div>
+
+      <Tabs tabs={[
+        {key:"contracts",label:"果园列表 DS vườn"},
+        {key:"weight",label:"重量明细 Chi tiết KG"},
+        ...(isAdmin?[{key:"assessment",label:"技术考核 Đánh giá KT"},{key:"settlement",label:"合同结算 Thanh toán"}]:[]),
+      ]} active={tab} onChange={setTab} />
+
+      {/* 合同列表 - 根据权限显示不同列 */}
+      {tab==="contracts"&&<Card>
+        <Table columns={[
+          {title:"果园 Vườn",key:"orchardName",render:v=><strong>{v||"—"}</strong>},
+          {title:"果农 Chủ vườn",key:"farmerName"},
+          ...(isAdmin?[{title:"电话 SĐT",key:"farmerPhone"}]:[]),
+          ...(isAdmin?[{title:"位置 Địa điểm",key:"location"}]:[]),
+          {title:"技术员 KT",key:"techStaff"},
+          {title:"预估量 Ước tính",key:"estTotalKG",render:v=>fmtKG(v),align:"right"},
+          {title:"实采量 Thực tế",key:"actualTotalKG",render:v=>v?fmtKG(v):"待采",align:"right"},
+          ...(isAdmin?[
+            {title:"单价 Đơn giá",key:"pricePerKG",render:v=>fmtVND(v)+"/kg",align:"right"},
+            {title:"合同额 Giá trị HĐ",key:"estTotalCost",render:v=>fmtVND(v),align:"right"},
+            {title:"意向金 Cọc",key:"depositAmount",render:v=>fmtVND(v),align:"right"},
+          ]:[]),
+          {title:"状态 TT",key:"status",render:v=><Badge color={v==="completed"?"#27ae60":v==="harvesting"?"#f39c12":"#3498db"}>{v==="completed"?"已完成":v==="harvesting"?"采摘中":"已签约"}</Badge>},
+          ...(canEdit?[{title:"操作",key:"id",align:"center",render:(_,row)=><div style={{display:"flex",gap:4,justifyContent:"center"}}>
+            <Btn size="sm" variant="ghost" onClick={e=>{e.stopPropagation();openEdit(row);}}>编辑</Btn>
+            <Btn size="sm" variant="danger" onClick={e=>{e.stopPropagation();removeFn(row.id);}}>删</Btn>
+          </div>}]:[]),
+        ]} data={data.orchards} />
+      </Card>}
+
+      {/* 重量明细 - 所有人可看，只有名称+等级重量 */}
+      {tab==="weight"&&<Card title="各果园等级重量明细 Chi tiết KG theo loại">
+        <Table columns={[
+          {title:"果园 Vườn",key:"orchardName",render:v=><strong>{v}</strong>},
+          {title:"果农 Chủ vườn",key:"farmerName"},
+          {title:"状态 TT",key:"status",render:v=><Badge color={v==="completed"?"#27ae60":v==="harvesting"?"#f39c12":"#3498db"}>{v==="completed"?"完成":v==="harvesting"?"采摘中":"签约"}</Badge>},
+          {title:"预估A",key:"estGrades",render:gs=>gs?.A?gs.A.toLocaleString():"—",align:"right"},
+          {title:"预估B",key:"estGrades",render:gs=>gs?.B?gs.B.toLocaleString():"—",align:"right"},
+          {title:"预估C",key:"estGrades",render:gs=>gs?.C?gs.C.toLocaleString():"—",align:"right"},
+          {title:"预估D",key:"estGrades",render:gs=>gs?.D?gs.D.toLocaleString():"—",align:"right"},
+          {title:"预估总量",key:"estTotalKG",render:v=><strong>{v?v.toLocaleString():""} kg</strong>,align:"right"},
+          {title:"实际A",key:"actualGrades",render:gs=>gs?.A?gs.A.toLocaleString():"—",align:"right"},
+          {title:"实际B",key:"actualGrades",render:gs=>gs?.B?gs.B.toLocaleString():"—",align:"right"},
+          {title:"实际C",key:"actualGrades",render:gs=>gs?.C?gs.C.toLocaleString():"—",align:"right"},
+          {title:"实际D",key:"actualGrades",render:gs=>gs?.D?gs.D.toLocaleString():"—",align:"right"},
+          {title:"实际总量",key:"actualTotalKG",render:v=><strong style={{color:v?"#27ae60":"#888"}}>{v?v.toLocaleString()+" kg":"待采"}</strong>,align:"right"},
+        ]} data={data.orchards} emptyText="暂无果园数据" />
+      </Card>}
+
+      {/* 技术考核 - 仅管理员 */}
+      {tab==="assessment"&&isAdmin&&<Card title="技术人员考核 Đánh giá kỹ thuật viên（预估vs实际）">
+        <Table columns={[
+          {title:"果园",key:"orchardName",render:v=><strong>{v}</strong>},{title:"技术员",key:"techStaff"},
+          {title:"预估",key:"estTotalKG",render:v=>fmtKG(v),align:"right"},
+          {title:"实际",key:"actualTotalKG",render:v=>v?fmtKG(v):"待采",align:"right"},
+          {title:"偏差",key:"id",align:"right",render:(_,r)=>{if(!r.actualTotalKG||!r.estTotalKG)return"—";const d=((r.actualTotalKG-r.estTotalKG)/r.estTotalKG*100);return <span style={{color:Math.abs(d)>10?"#e74c3c":"#27ae60",fontWeight:700}}>{d>0?"+":""}{d.toFixed(1)}%</span>;}},
+          {title:"预估A%",key:"id",render:(_,r)=>{const t=Object.values(r.estGrades||{}).reduce((a,b)=>a+b,0);return t>0?((r.estGrades?.A||0)/t*100).toFixed(1)+"%":"—";},align:"right"},
+          {title:"实际A%",key:"id",render:(_,r)=>{const t=Object.values(r.actualGrades||{}).reduce((a,b)=>a+b,0);return t>0?((r.actualGrades?.A||0)/t*100).toFixed(1)+"%":"—";},align:"right"},
+          {title:"结算差额",key:"id",align:"right",render:(_,r)=>{if(!r.actualTotalKG)return"—";const d=(r.actualTotalKG*(r.pricePerKG||0))-(r.estTotalCost||0);return <strong style={{color:d>0?"#e74c3c":"#27ae60"}}>{d>0?"补付":"退还"} {fmtVND(Math.abs(d))}</strong>;}},
+        ]} data={data.orchards.filter(o=>o.status==="completed"||o.actualTotalKG>0)} emptyText="暂无已完成考核数据" />
+      </Card>}
+
+      {/* 合同结算 - 仅管理员 */}
+      {tab==="settlement"&&isAdmin&&<Card title="果园合同结算 Thanh toán hợp đồng vườn（意向金20%抵扣，多退少补）">
+        <Table columns={[
+          {title:"果园",key:"orchardName",render:v=><strong>{v}</strong>},
+          {title:"合同额",key:"estTotalCost",render:v=>fmtVND(v),align:"right"},
+          {title:"意向金",key:"depositAmount",render:v=>fmtVND(v),align:"right"},
+          {title:"实采量",key:"actualTotalKG",render:v=>v?fmtKG(v):"待采",align:"right"},
+          {title:"实际总额",key:"id",render:(_,r)=>r.actualTotalKG?fmtVND(r.actualTotalKG*r.pricePerKG):"—",align:"right"},
+          {title:"尾款/退款",key:"id",align:"right",render:(_,r)=>{if(!r.actualTotalKG)return"—";const d=(r.actualTotalKG*r.pricePerKG)-(r.depositAmount||0);return <strong style={{color:d>=0?"#e74c3c":"#27ae60"}}>{d>=0?"补付 Trả thêm":"退还 Hoàn lại"} {fmtVND(Math.abs(d))}</strong>;}},
+          {title:"状态",key:"status",render:v=><Badge color={v==="completed"?"#27ae60":"#f39c12"}>{v==="completed"?"已结算":"进行中"}</Badge>},
+        ]} data={data.orchards} />
+      </Card>}
+
+      {/* 编辑表单 - 仅管理员可打开 */}
+      {showForm&&editItem&&isAdmin&&(
+        <Modal title="果园合同 Hợp đồng vườn 🔒机密" onClose={()=>setShowForm(false)} width={640}>
+          <div style={{background:"#FFEBEE",borderRadius:8,padding:"8px 14px",marginBottom:14,fontSize:12,color:"#B71C1C"}}>
+            🔒 机密信息 — 此页面仅最高权限管理员可查看和编辑，包含价格、合同金额等敏感数据
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 16px"}}>
+            <Input label="果园名称 Tên vườn" value={editItem.orchardName} onChange={v=>setEditItem({...editItem,orchardName:v})} required />
+            <Input label="果农姓名 Chủ vườn" value={editItem.farmerName} onChange={v=>setEditItem({...editItem,farmerName:v})} />
+            <Input label="果农电话 SĐT" value={editItem.farmerPhone} onChange={v=>setEditItem({...editItem,farmerPhone:v})} />
+            <Input label="位置 Địa điểm" value={editItem.location} onChange={v=>setEditItem({...editItem,location:v})} />
+            <Input label="签约日期 Ngày ký" type="date" value={editItem.contractDate} onChange={v=>setEditItem({...editItem,contractDate:v})} />
+            <Input label="技术员 KTV" value={editItem.techStaff} onChange={v=>setEditItem({...editItem,techStaff:v})} />
+            <Input label="预估总量(KG)" type="number" value={editItem.estTotalKG} onChange={v=>setEditItem({...editItem,estTotalKG:v})} suffix="KG" />
+            <Input label="统购单价(VND/KG)" type="number" value={editItem.pricePerKG} onChange={v=>setEditItem({...editItem,pricePerKG:v})} suffix="₫/KG" />
+          </div>
+          <div style={{background:"#f8f9fa",borderRadius:8,padding:12,marginBottom:14,fontSize:12}}>
+            合同总额：<strong>{fmtVND((parseFloat(editItem.estTotalKG)||0)*(parseFloat(editItem.pricePerKG)||0))}</strong>
+            　意向金(20%)：<strong style={{color:"#e74c3c"}}>{fmtVND((parseFloat(editItem.estTotalKG)||0)*(parseFloat(editItem.pricePerKG)||0)*0.2)}</strong>
+            　直采成本标准：6,500₫/KG
+          </div>
+          <div style={{fontSize:13,fontWeight:700,marginBottom:8}}>预估等级(KG) Ước tính theo loại</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:"0 12px"}}>
+            {["A","B","C","D"].map(g=><Input key={g} label={g+"级"} type="number" value={editItem.estGrades[g]} onChange={v=>setEditItem({...editItem,estGrades:{...editItem.estGrades,[g]:v}})} suffix="KG" />)}
+          </div>
+          <div style={{fontSize:13,fontWeight:700,marginBottom:8,marginTop:8}}>实际采摘(KG) Thực tế thu hoạch</div>
+          <Input label="实际总量" type="number" value={editItem.actualTotalKG} onChange={v=>setEditItem({...editItem,actualTotalKG:v})} suffix="KG" style={{maxWidth:200}} />
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:"0 12px"}}>
+            {["A","B","C","D"].map(g=><Input key={g} label={"实际"+g+"级"} type="number" value={editItem.actualGrades[g]} onChange={v=>setEditItem({...editItem,actualGrades:{...editItem.actualGrades,[g]:v}})} suffix="KG" />)}
+          </div>
+          <Input label="状态 Trạng thái" value={editItem.status} onChange={v=>setEditItem({...editItem,status:v})} options={[{value:"contracted",label:"已签约 Đã ký"},{value:"harvesting",label:"采摘中 Đang thu"},{value:"completed",label:"已完成 Hoàn thành"}]} />
+          <Input label="备注 Ghi chú" type="textarea" value={editItem.notes} onChange={v=>setEditItem({...editItem,notes:v})} />
+          <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginTop:16}}><Btn variant="secondary" onClick={()=>setShowForm(false)}>取消</Btn><Btn onClick={saveFn}>保存</Btn></div>
+        </Modal>
+      )}
+    </div>
+  );
+};
+
+// ═══════════════════════════════════════════════════════
+// Process Module (加工管理)
+// ═══════════════════════════════════════════════════════
+const ProcessModule = ({ data, setData, role }) => {
+  const [showForm,setShowForm]=useState(false);
+  const [editItem,setEditItem]=useState(null);
+  const canEdit=ROLES[role]?.level>=1;
+  const stepLabels={unload:"卸车分级称重",wash:"清洗清洁",disinfect:"泡药消毒",drying:"上架风干(~10h)",labeling:"贴品牌标签",packing:"打包装箱",ferment:"发酵(24-48h)",ready:"待装车"};
+  const empty={id:"",batchNo:"",startDate:today(),rawWeight:"",processedWeight:"",steps:Object.fromEntries(Object.keys(stepLabels).map(k=>[k,{done:false,time:""}])),status:"receiving",loss:"",notes:""};
+  const openNew=()=>{setEditItem({...empty,id:genId(),batchNo:"B"+Date.now().toString().slice(-6)});setShowForm(true);};
+  const openEdit=b=>{setEditItem(JSON.parse(JSON.stringify(b)));setShowForm(true);};
+  const saveFn=()=>{
+    const item={...editItem};item.rawWeight=parseFloat(item.rawWeight)||0;item.processedWeight=parseFloat(item.processedWeight)||0;item.loss=item.rawWeight-item.processedWeight;
+    const list=[...data.batches];const idx=list.findIndex(b=>b.id===item.id);if(idx>=0)list[idx]=item;else list.push(item);
+    setData({...data,batches:list});save(SK.batches,list);setShowForm(false);
+  };
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+        <h2 style={{margin:0,fontSize:20,fontWeight:800,color:"#1B4332"}}>⚙️ 加工流程管理 Quản lý chế biến</h2>
+        {canEdit&&<Btn onClick={openNew}>+ 新建批次</Btn>}
+      </div>
+      <div style={{display:"flex",gap:12,marginBottom:20,flexWrap:"wrap"}}>
+        <StatCard label="活跃批次" value={data.batches.filter(b=>b.status!=="completed").length} />
+        <StatCard label="总损耗" value={fmtKG(data.batches.reduce((s,b)=>s+(b.loss||0),0))} color="#e74c3c" />
+        <StatCard label="场内加工费率" value="1,600₫/KG" color="#2980b9" />
+      </div>
+      <Card><Table columns={[
+        {title:"批次号",key:"batchNo",render:v=><strong style={{fontFamily:"monospace"}}>{v}</strong>},
+        {title:"日期",key:"startDate",nowrap:true},
+        {title:"原料重量",key:"rawWeight",render:v=>fmtKG(v),align:"right"},
+        {title:"成品重量",key:"processedWeight",render:v=>v?fmtKG(v):"—",align:"right"},
+        {title:"损耗",key:"loss",align:"right",render:(v,r)=>{if(!r.processedWeight)return"—";const l=r.rawWeight-(r.processedWeight||r.rawWeight);const ok=l>=450&&l<=700;return <span style={{color:ok?"#27ae60":"#e74c3c",fontWeight:700}}>{fmtKG(l)}{!ok&&l>0?(l>700?" ⚠️偏高":" ⚠️偏低"):""}</span>;}},
+        {title:"状态",key:"status",render:v=><Badge color={{receiving:"#3498db",processing:"#f39c12",fermenting:"#8e44ad",ready:"#27ae60",completed:"#95a5a6"}[v]||"#999"}>{{receiving:"收货中",processing:"加工中",fermenting:"发酵中",ready:"待装车",completed:"已完成"}[v]||v}</Badge>},
+        {title:"进度",key:"steps",render:steps=>{if(!steps)return"—";const t=Object.keys(steps).length;const d=Object.values(steps).filter(s=>s.done).length;return <div style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:80,height:6,borderRadius:3,background:"#e9ecef"}}><div style={{width:`${(d/t)*100}%`,height:"100%",borderRadius:3,background:"#27ae60"}} /></div><span style={{fontSize:11,color:"#888"}}>{d}/{t}</span></div>;}},
+        {title:"操作",key:"id",align:"center",render:(_,row)=>canEdit?<Btn size="sm" variant="ghost" onClick={e=>{e.stopPropagation();openEdit(row);}}>管理</Btn>:null},
+      ]} data={data.batches} /></Card>
+      {showForm&&editItem&&(
+        <Modal title={`批次 ${editItem.batchNo}`} onClose={()=>setShowForm(false)} width={680}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 16px"}}>
+            <Input label="批次号" value={editItem.batchNo} disabled />
+            <Input label="日期" type="date" value={editItem.startDate} onChange={v=>setEditItem({...editItem,startDate:v})} />
+            <Input label="原料重量(KG)" type="number" value={editItem.rawWeight} onChange={v=>setEditItem({...editItem,rawWeight:v})} suffix="KG" />
+            <Input label="成品重量(KG)" type="number" value={editItem.processedWeight} onChange={v=>setEditItem({...editItem,processedWeight:v})} suffix="KG" />
+          </div>
+          {editItem.rawWeight&&editItem.processedWeight&&<div style={{background:"#f8f9fa",borderRadius:8,padding:12,marginBottom:14,fontSize:12}}>损耗：<strong style={{color:"#e74c3c"}}>{fmtKG(parseFloat(editItem.rawWeight)-parseFloat(editItem.processedWeight))}</strong>　正常范围：450-700 KG　加工费：<strong>{fmtVND(parseFloat(editItem.processedWeight)*1600)}</strong></div>}
+          <Input label="状态" value={editItem.status} onChange={v=>setEditItem({...editItem,status:v})} options={[{value:"receiving",label:"收货中"},{value:"processing",label:"加工中"},{value:"fermenting",label:"发酵中"},{value:"ready",label:"待装车"},{value:"completed",label:"已完成"}]} />
+          <div style={{fontSize:14,fontWeight:700,color:"#1B4332",marginBottom:12,marginTop:8}}>加工流程节点</div>
+          {Object.entries(stepLabels).map(([key,label])=>(
+            <div key={key} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 14px",borderRadius:8,background:editItem.steps?.[key]?.done?"#e8f5e9":"#f8f9fa",border:`1px solid ${editItem.steps?.[key]?.done?"#a5d6a7":"#e0e0e0"}`,marginBottom:6}}>
+              <input type="checkbox" checked={editItem.steps?.[key]?.done||false} onChange={e=>setEditItem({...editItem,steps:{...editItem.steps,[key]:{...editItem.steps[key],done:e.target.checked,time:e.target.checked?new Date().toLocaleString("zh-CN"):""}}})} style={{width:18,height:18,accentColor:"#1B4332"}} />
+              <span style={{flex:1,fontWeight:600,fontSize:13}}>{label}</span>
+              {editItem.steps?.[key]?.time&&<span style={{fontSize:11,color:"#888"}}>{editItem.steps[key].time}</span>}
+            </div>
+          ))}
+          <Input label="备注" type="textarea" value={editItem.notes} onChange={v=>setEditItem({...editItem,notes:v})} style={{marginTop:12}} />
+          <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginTop:16}}><Btn variant="secondary" onClick={()=>setShowForm(false)}>取消</Btn><Btn onClick={saveFn}>保存</Btn></div>
+        </Modal>
+      )}
+    </div>
+  );
+};
+
+// ═══════════════════════════════════════════════════════
+// Finance Module - Full featured with payment CRUD
+// ═══════════════════════════════════════════════════════
+const FinanceModule = ({ data, setData, role }) => {
+  const [tab,setTab]=useState("overview");
+  const [showForm,setShowForm]=useState(false);
+  const [editItem,setEditItem]=useState(null);
+  const [filterType,setFilterType]=useState("all");
+  const [filterMonth,setFilterMonth]=useState("");
+  const canEdit=ROLES[role]?.level>=2;
+
+  // ── payment records stored in data.payments ──
+  const payments=data.payments||[];
+
+  const emptyPayment={id:"",date:today(),type:"income",category:"",counterparty:"",amount:"",method:"cash",refNo:"",relatedId:"",notes:"",createdBy:""};
+
+  const incomeCategories=[
+    {value:"client_prepay",label:"客户预付款（代加工定金）"},
+    {value:"processing_fee",label:"加工费结算"},
+    {value:"loading_fee",label:"装车费结算"},
+    {value:"shareholder_inject",label:"股东注资"},
+    {value:"sale_cd_meat",label:"CD果剥肉销售"},
+    {value:"sale_frozen_whole",label:"冷冻榴莲鲜果销售"},
+    {value:"sale_frozen_meat",label:"冷冻榴莲果肉销售"},
+    {value:"sale_d_fruit",label:"D果内销收入"},
+    {value:"other_income",label:"其他收入"},
+  ];
+  const expenseCategories=[
+    {value:"vendor_purchase",label:"果款付款 Tiền hàng"},
+    {value:"orchard_deposit",label:"果园意向金 Tiền cọc vườn"},
+    {value:"orchard_balance",label:"果园尾款 Tiền vườn còn lại"},
+    {value:"orchard_harvest",label:"砍果运输 Cước vận chuyển vườn"},
+    {value:"processing_cost",label:"加工费 Gia công"},
+    {value:"salary_office",label:"办公工资 Lương VP"},
+    {value:"salary_worker",label:"工人工资 Lương thợ"},
+    {value:"temp_labor",label:"临时工 Lương thời vụ"},
+    {value:"packaging_box",label:"纸箱 Thùng carton"},
+    {value:"packaging_label",label:"标签/果柄 Tem nhãn"},
+    {value:"chemicals",label:"消毒药剂 Thuốc xử lý"},
+    {value:"transport",label:"运费/车费 Cước xe"},
+    {value:"customs",label:"通关费 Thông quan"},
+    {value:"rent",label:"厂房租金 Thuê kho"},
+    {value:"electricity",label:"电费 Tiền điện"},
+    {value:"water",label:"水费 Tiền nước"},
+    {value:"meals",label:"伙食费 Ăn uống"},
+    {value:"fuel",label:"汽油费 Xăng dầu"},
+    {value:"equipment",label:"设备/物资 Vật tư"},
+    {value:"nitrogen",label:"液氮冷冻 Cấp đông Nito"},
+    {value:"commission",label:"介绍费/佣金 Hoa hồng"},
+    {value:"inspection",label:"鉴定费 Giám định"},
+    {value:"insurance",label:"保险 Bảo hiểm"},
+    {value:"tax_fee",label:"税费/手续费 Thuế/Phí"},
+    {value:"fire_safety",label:"消防 PCCC"},
+    {value:"other_expense",label:"其他支出 Chi phí khác"},
+  ];
+  const methodOptions=[
+    {value:"cash",label:"现金 Tiền mặt"},{value:"bank",label:"银行转账 Ngân hàng"},{value:"wechat",label:"微信 WeChat"},{value:"alipay",label:"支付宝 Alipay"},{value:"other",label:"其他 Khác"},
+  ];
+  const allCategories=[...incomeCategories,...expenseCategories];
+  const getCatLabel=(v)=>allCategories.find(c=>c.value===v)?.label||v;
+
+  const openNew=(type)=>{setEditItem({...emptyPayment,id:genId(),type:type||"income"});setShowForm(true);};
+  const openEdit=(p)=>{setEditItem({...p});setShowForm(true);};
+
+  const saveFn=()=>{
+    const item={...editItem,amount:parseFloat(editItem.amount)||0};
+    const list=[...payments];
+    const idx=list.findIndex(p=>p.id===item.id);
+    if(idx>=0)list[idx]=item;else list.push(item);
+    const sorted=list.sort((a,b)=>b.date.localeCompare(a.date));
+    setData({...data,payments:sorted});
+    save("df_pay",sorted);
+    setShowForm(false);
+  };
+  const removeFn=(id)=>{
+    if(!confirm("确认删除该收付款记录？"))return;
+    const list=payments.filter(p=>p.id!==id);
+    setData({...data,payments:list});
+    save("df_pay",list);
+  };
+
+  // ── Calculations ──
+  const totalIncome=payments.filter(p=>p.type==="income").reduce((s,p)=>s+(p.amount||0),0);
+  const totalExpense=payments.filter(p=>p.type==="expense").reduce((s,p)=>s+(p.amount||0),0);
+  const balance=totalIncome-totalExpense;
+  // Cash vs Bank breakdown
+  const cashIn=payments.filter(p=>p.type==="income"&&p.method==="cash").reduce((s,p)=>s+(p.amount||0),0);
+  const cashOut=payments.filter(p=>p.type==="expense"&&p.method==="cash").reduce((s,p)=>s+(p.amount||0),0);
+  const bankIn=payments.filter(p=>p.type==="income"&&p.method==="bank").reduce((s,p)=>s+(p.amount||0),0);
+  const bankOut=payments.filter(p=>p.type==="expense"&&p.method==="bank").reduce((s,p)=>s+(p.amount||0),0);
+
+  // Auto-calculated from business data
+  const autoRevProcessing=data.containers.reduce((s,c)=>s+((c.loadedWeight||0)*15000),0);
+  const autoRevLoading=data.containers.filter(c=>c.status==="completed").length*3000000;
+  const autoCostVendor=data.purchases.filter(p=>p.source==="vendor").reduce((s,p)=>s+(p.totalCost||0),0);
+  const autoCostOrchard=data.orchards.reduce((s,o)=>s+((o.actualTotalKG||o.estTotalKG||0)*6500),0);
+  const autoCostProcess=data.batches.reduce((s,b)=>s+((b.processedWeight||b.rawWeight||0)*1600),0);
+  const autoCostSalary=data.staff.filter(s=>s.active).reduce((s,st)=>s+(st.salary||0),0);
+
+  // Registered income/expense by category
+  const byCat=(type)=>{
+    const cats=type==="income"?incomeCategories:expenseCategories;
+    return cats.map(c=>{
+      const total=payments.filter(p=>p.type===type&&p.category===c.value).reduce((s,p)=>s+(p.amount||0),0);
+      return {label:c.label,value:c.value,total};
+    }).filter(c=>c.total>0);
+  };
+
+  // Filter payments for ledger view
+  const filtered=payments.filter(p=>{
+    if(filterType!=="all"&&p.type!==filterType)return false;
+    if(filterMonth&&!p.date.startsWith(filterMonth))return false;
+    return true;
+  });
+
+  // Running balance
+  const withBalance=(()=>{
+    let bal=0;
+    const sorted=[...filtered].sort((a,b)=>a.date.localeCompare(b.date));
+    return sorted.map(p=>{
+      bal+=p.type==="income"?(p.amount||0):-(p.amount||0);
+      return {...p,runBalance:bal};
+    }).reverse();
+  })();
+
+  // Months for filter
+  const months=[...new Set(payments.map(p=>p.date.slice(0,7)))].sort().reverse();
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+        <h2 style={{margin:0,fontSize:20,fontWeight:800,color:"#1B4332"}}>💰 财务管理 Quản lý tài chính</h2>
+        {canEdit&&<div style={{display:"flex",gap:8}}>
+          <Btn onClick={()=>openNew("income")} variant="success">+ 登记收款</Btn>
+          <Btn onClick={()=>openNew("expense")} variant="danger">+ 登记付款</Btn>
+        </div>}
+      </div>
+
+      <div style={{display:"flex",gap:12,marginBottom:20,flexWrap:"wrap"}}>
+        <StatCard label="总收入 Thu" value={fmtVND(totalIncome)} color="#27ae60" sub={`${payments.filter(p=>p.type==="income").length} 笔`} />
+        <StatCard label="总支出 Chi" value={fmtVND(totalExpense)} color="#e74c3c" sub={`${payments.filter(p=>p.type==="expense").length} 笔`} />
+        <StatCard label="账面余额 Số dư" value={fmtVND(balance)} color={balance>=0?"#1B4332":"#e74c3c"} />
+        <StatCard label="现金余额 Tiền mặt" value={fmtVND(cashIn-cashOut)} color="#e67e22" sub={`收${fmtVND(cashIn)} 支${fmtVND(cashOut)}`} />
+        <StatCard label="银行余额 Ngân hàng" value={fmtVND(bankIn-bankOut)} color="#2980b9" sub={`收${fmtVND(bankIn)} 支${fmtVND(bankOut)}`} />
+      </div>
+
+      <Tabs tabs={[
+        {key:"overview",label:"收支概览 Tổng quan"},
+        {key:"ledger",label:"全部台账 Sổ cái"},
+        {key:"cash",label:"现金账 Tiền mặt"},
+        {key:"bank",label:"银行账 Ngân hàng"},
+        {key:"income_detail",label:"收入明细 Thu"},
+        {key:"expense_detail",label:"支出明细 Chi"},
+        {key:"settle",label:"果园结算 TT vườn"},
+        {key:"auto_calc",label:"业务核算 Đối chiếu"},
+      ]} active={tab} onChange={setTab} />
+
+      {/* ── Overview ── */}
+      {tab==="overview"&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
+        <Card title="收入分类汇总">
+          {byCat("income").length>0?byCat("income").map(c=>(
+            <div key={c.value} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f0f0f0",fontSize:13}}>
+              <span>{c.label}</span><strong style={{color:"#27ae60"}}>{fmtVND(c.total)}</strong>
+            </div>
+          )):<div style={{color:"#aaa",textAlign:"center",padding:20}}>暂无收入登记，请点击"登记收款"</div>}
+          {byCat("income").length>0&&<div style={{display:"flex",justifyContent:"space-between",padding:"10px 0",fontWeight:800,fontSize:15,borderTop:"2px solid #333",marginTop:4}}>
+            <span>收入合计</span><span style={{color:"#27ae60"}}>{fmtVND(totalIncome)}</span>
+          </div>}
+        </Card>
+        <Card title="支出分类汇总">
+          {byCat("expense").length>0?byCat("expense").map(c=>(
+            <div key={c.value} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f0f0f0",fontSize:13}}>
+              <span>{c.label}</span><strong style={{color:"#e74c3c"}}>{fmtVND(c.total)}</strong>
+            </div>
+          )):<div style={{color:"#aaa",textAlign:"center",padding:20}}>暂无支出登记，请点击"登记付款"</div>}
+          {byCat("expense").length>0&&<div style={{display:"flex",justifyContent:"space-between",padding:"10px 0",fontWeight:800,fontSize:15,borderTop:"2px solid #333",marginTop:4}}>
+            <span>支出合计</span><span style={{color:"#e74c3c"}}>{fmtVND(totalExpense)}</span>
+          </div>}
+        </Card>
+      </div>}
+
+      {/* ── Ledger (台账) ── */}
+      {tab==="ledger"&&<Card>
+        <div style={{display:"flex",gap:12,marginBottom:16,alignItems:"center",flexWrap:"wrap"}}>
+          <Input label="" value={filterType} onChange={setFilterType} options={[{value:"all",label:"全部"},{value:"income",label:"仅收入"},{value:"expense",label:"仅支出"}]} style={{marginBottom:0,minWidth:120}} />
+          <Input label="" value={filterMonth} onChange={setFilterMonth} options={[{value:"",label:"全部月份"},...months.map(m=>({value:m,label:m}))] } style={{marginBottom:0,minWidth:140}} />
+          <span style={{fontSize:12,color:"#888"}}>共 {withBalance.length} 条记录</span>
+        </div>
+        <Table columns={[
+          {title:"日期",key:"date",nowrap:true},
+          {title:"类型",key:"type",render:v=><Badge color={v==="income"?"#27ae60":"#e74c3c"}>{v==="income"?"收入":"支出"}</Badge>},
+          {title:"分类",key:"category",render:v=>getCatLabel(v)},
+          {title:"对方",key:"counterparty",render:v=><strong>{v||"—"}</strong>},
+          {title:"金额",key:"amount",align:"right",render:(v,row)=><strong style={{color:row.type==="income"?"#27ae60":"#e74c3c"}}>{row.type==="income"?"+":"-"}{fmtVND(v)}</strong>},
+          {title:"方式",key:"method",render:v=>({cash:"现金",bank:"银行",wechat:"微信",alipay:"支付宝"}[v]||v)},
+          {title:"单据号",key:"refNo",render:v=><span style={{fontFamily:"monospace",fontSize:11}}>{v||"—"}</span>},
+          {title:"余额",key:"runBalance",align:"right",render:v=><span style={{fontWeight:600,color:v>=0?"#1B4332":"#e74c3c"}}>{fmtVND(v)}</span>},
+          {title:"操作",key:"id",align:"center",render:(_,row)=>canEdit?<div style={{display:"flex",gap:4,justifyContent:"center"}}>
+            <Btn size="sm" variant="ghost" onClick={e=>{e.stopPropagation();openEdit(row);}}>编辑</Btn>
+            <Btn size="sm" variant="danger" onClick={e=>{e.stopPropagation();removeFn(row.id);}}>删</Btn>
+          </div>:null},
+        ]} data={withBalance} emptyText="暂无收付款记录，请点击上方按钮登记" />
+      </Card>}
+
+      {/* ── Cash Ledger 现金账 ── */}
+      {tab==="cash"&&<Card title="现金账 Sổ tiền mặt">
+        {(()=>{let bal=0;const cashItems=payments.filter(p=>p.method==="cash").sort((a,b)=>a.date.localeCompare(b.date)).map(p=>{bal+=p.type==="income"?(p.amount||0):-(p.amount||0);return{...p,runBal:bal};}).reverse();
+        return <Table columns={[
+          {title:"日期 Ngày",key:"date",nowrap:true},
+          {title:"内容 Nội dung",key:"counterparty",render:(v,r)=><span><Badge color={r.type==="income"?"#27ae60":"#e74c3c"}>{r.type==="income"?"收Thu":"支Chi"}</Badge> {getCatLabel(r.category)} — {v}</span>},
+          {title:"收入 Thu",key:"amount",align:"right",render:(v,r)=>r.type==="income"?<strong style={{color:"#27ae60"}}>{fmtVND(v)}</strong>:""},
+          {title:"支出 Chi",key:"amount",align:"right",render:(v,r)=>r.type==="expense"?<strong style={{color:"#e74c3c"}}>{fmtVND(v)}</strong>:""},
+          {title:"余额 Còn lại",key:"runBal",align:"right",render:v=><strong style={{color:v>=0?"#1B4332":"#e74c3c"}}>{fmtVND(v)}</strong>},
+        ]} data={cashItems} emptyText="暂无现金记录" />;})()}
+      </Card>}
+
+      {/* ── Bank Ledger 银行账 ── */}
+      {tab==="bank"&&<Card title="银行账 Sổ ngân hàng">
+        {(()=>{let bal=0;const bankItems=payments.filter(p=>p.method==="bank").sort((a,b)=>a.date.localeCompare(b.date)).map(p=>{bal+=p.type==="income"?(p.amount||0):-(p.amount||0);return{...p,runBal:bal};}).reverse();
+        return <Table columns={[
+          {title:"日期 Ngày",key:"date",nowrap:true},
+          {title:"内容 Nội dung",key:"counterparty",render:(v,r)=><span><Badge color={r.type==="income"?"#27ae60":"#e74c3c"}>{r.type==="income"?"收Thu":"支Chi"}</Badge> {getCatLabel(r.category)} — {v}</span>},
+          {title:"收入 Thu",key:"amount",align:"right",render:(v,r)=>r.type==="income"?<strong style={{color:"#27ae60"}}>{fmtVND(v)}</strong>:""},
+          {title:"支出 Chi",key:"amount",align:"right",render:(v,r)=>r.type==="expense"?<strong style={{color:"#e74c3c"}}>{fmtVND(v)}</strong>:""},
+          {title:"余额 Còn lại",key:"runBal",align:"right",render:v=><strong style={{color:v>=0?"#1B4332":"#e74c3c"}}>{fmtVND(v)}</strong>},
+        ]} data={bankItems} emptyText="暂无银行记录" />;})()}
+      </Card>}
+
+      {/* ── Income detail ── */}
+      {tab==="income_detail"&&<Card title="收入明细 Chi tiết thu" actions={canEdit?<Btn size="sm" variant="success" onClick={()=>openNew("income")}>+ 登记收款</Btn>:null}>
+        <Table columns={[
+          {title:"日期",key:"date",nowrap:true},
+          {title:"分类",key:"category",render:v=>getCatLabel(v)},
+          {title:"客户/来源",key:"counterparty",render:v=><strong>{v||"—"}</strong>},
+          {title:"金额",key:"amount",align:"right",render:v=><strong style={{color:"#27ae60"}}>{fmtVND(v)}</strong>},
+          {title:"方式",key:"method",render:v=>({cash:"现金",bank:"银行",wechat:"微信",alipay:"支付宝"}[v]||v)},
+          {title:"单据号",key:"refNo",render:v=>v||"—"},
+          {title:"备注",key:"notes"},
+          {title:"操作",key:"id",align:"center",render:(_,row)=>canEdit?<div style={{display:"flex",gap:4,justifyContent:"center"}}>
+            <Btn size="sm" variant="ghost" onClick={e=>{e.stopPropagation();openEdit(row);}}>编辑</Btn>
+            <Btn size="sm" variant="danger" onClick={e=>{e.stopPropagation();removeFn(row.id);}}>删</Btn>
+          </div>:null},
+        ]} data={payments.filter(p=>p.type==="income")} emptyText="暂无收入记录" />
+      </Card>}
+
+      {/* ── Expense detail ── */}
+      {tab==="expense_detail"&&<Card title="支出明细" actions={canEdit?<Btn size="sm" variant="danger" onClick={()=>openNew("expense")}>+ 登记付款</Btn>:null}>
+        <Table columns={[
+          {title:"日期",key:"date",nowrap:true},
+          {title:"分类",key:"category",render:v=>getCatLabel(v)},
+          {title:"收款方",key:"counterparty",render:v=><strong>{v||"—"}</strong>},
+          {title:"金额",key:"amount",align:"right",render:v=><strong style={{color:"#e74c3c"}}>{fmtVND(v)}</strong>},
+          {title:"方式",key:"method",render:v=>({cash:"现金",bank:"银行",wechat:"微信",alipay:"支付宝"}[v]||v)},
+          {title:"单据号",key:"refNo",render:v=>v||"—"},
+          {title:"备注",key:"notes"},
+          {title:"操作",key:"id",align:"center",render:(_,row)=>canEdit?<div style={{display:"flex",gap:4,justifyContent:"center"}}>
+            <Btn size="sm" variant="ghost" onClick={e=>{e.stopPropagation();openEdit(row);}}>编辑</Btn>
+            <Btn size="sm" variant="danger" onClick={e=>{e.stopPropagation();removeFn(row.id);}}>删</Btn>
+          </div>:null},
+        ]} data={payments.filter(p=>p.type==="expense")} emptyText="暂无支出记录" />
+      </Card>}
+
+      {/* ── Orchard settlement ── */}
+      {tab==="settle"&&<Card title="果园结算（意向金20%抵扣，多退少补）"><Table columns={[
+        {title:"果园",key:"orchardName",render:v=><strong>{v}</strong>},{title:"合同额",key:"estTotalCost",render:v=>fmtVND(v),align:"right"},
+        {title:"意向金",key:"depositAmount",render:v=>fmtVND(v),align:"right"},
+        {title:"实采量",key:"actualTotalKG",render:v=>v?fmtKG(v):"待采",align:"right"},
+        {title:"实际总额",key:"id",render:(_,r)=>r.actualTotalKG?fmtVND(r.actualTotalKG*r.pricePerKG):"—",align:"right"},
+        {title:"尾款/退款",key:"id",align:"right",render:(_,r)=>{if(!r.actualTotalKG)return"—";const d=(r.actualTotalKG*r.pricePerKG)-(r.depositAmount||0);return <strong style={{color:d>=0?"#e74c3c":"#27ae60"}}>{d>=0?"补付":"退还"} {fmtVND(Math.abs(d))}</strong>;}},
+      ]} data={data.orchards} /></Card>}
+
+      {/* ── Auto calculated from business data ── */}
+      {tab==="auto_calc"&&<div>
+        <div style={{background:"#FFFDE7",borderRadius:8,padding:"12px 16px",marginBottom:16,fontSize:12,color:"#795548"}}>
+          以下数据根据采购、加工、装车等模块自动计算，用于与实际收付款台账核对。差异部分可能是未登记的款项。
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
+          <Card title="应收（业务自动计算）"><div style={{fontSize:13,lineHeight:2.2}}>
+            {[["加工费 15,000₫/KG",autoRevProcessing],["装车费 3,000,000₫/柜",autoRevLoading]].map(([l,v])=><div key={l} style={{display:"flex",justifyContent:"space-between",borderBottom:"1px solid #f0f0f0",padding:"4px 0"}}><span>{l}</span><strong style={{color:"#27ae60"}}>{fmtVND(v)}</strong></div>)}
+            <div style={{display:"flex",justifyContent:"space-between",padding:"8px 0",fontWeight:800,fontSize:15,borderTop:"2px solid #333"}}><span>应收合计</span><span style={{color:"#27ae60"}}>{fmtVND(autoRevProcessing+autoRevLoading)}</span></div>
+            <div style={{marginTop:8,fontSize:12,color:totalIncome>=(autoRevProcessing+autoRevLoading)?"#27ae60":"#e74c3c"}}>
+              已收: {fmtVND(totalIncome)} | 差额: {fmtVND(totalIncome-(autoRevProcessing+autoRevLoading))}
+            </div>
+          </div></Card>
+          <Card title="应付（业务自动计算）"><div style={{fontSize:13,lineHeight:2.2}}>
+            {[["商贩采购",autoCostVendor],["果园直采 6,500₫/KG",autoCostOrchard],["场内加工 1,600₫/KG",autoCostProcess],["人工月薪",autoCostSalary]].map(([l,v])=><div key={l} style={{display:"flex",justifyContent:"space-between",borderBottom:"1px solid #f0f0f0",padding:"4px 0"}}><span>{l}</span><strong style={{color:"#e74c3c"}}>{fmtVND(v)}</strong></div>)}
+            <div style={{display:"flex",justifyContent:"space-between",padding:"8px 0",fontWeight:800,fontSize:15,borderTop:"2px solid #333"}}><span>应付合计</span><span style={{color:"#e74c3c"}}>{fmtVND(autoCostVendor+autoCostOrchard+autoCostProcess+autoCostSalary)}</span></div>
+            <div style={{marginTop:8,fontSize:12,color:totalExpense>=(autoCostVendor+autoCostOrchard+autoCostProcess+autoCostSalary)?"#27ae60":"#e74c3c"}}>
+              已付: {fmtVND(totalExpense)} | 差额: {fmtVND(totalExpense-(autoCostVendor+autoCostOrchard+autoCostProcess+autoCostSalary))}
+            </div>
+          </div></Card>
+        </div>
+      </div>}
+
+      {/* ── Payment Form ── */}
+      {showForm&&editItem&&(
+        <Modal title={editItem.type==="income"?"登记收款":"登记付款"} onClose={()=>setShowForm(false)} width={600}>
+          <div style={{background:editItem.type==="income"?"#e8f5e9":"#fce4ec",borderRadius:8,padding:"10px 16px",marginBottom:16,fontSize:13,fontWeight:600,color:editItem.type==="income"?"#1B5E20":"#B71C1C"}}>
+            {editItem.type==="income"?"📥 收入登记 — 客户预付款/加工费结算/股东注资/CD果及冷冻产品销售":"📤 支出登记 — 采购付款/果园结算/人工/包材/运输/租金等"}
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 16px"}}>
+            <Input label="日期" type="date" value={editItem.date} onChange={v=>setEditItem({...editItem,date:v})} required />
+            <Input label="收支类型" value={editItem.type} onChange={v=>setEditItem({...editItem,type:v,category:""})}
+              options={[{value:"income",label:"收入"},{value:"expense",label:"支出"}]} />
+            <Input label="分类" value={editItem.category} onChange={v=>setEditItem({...editItem,category:v})} required
+              options={editItem.type==="income"?incomeCategories:expenseCategories} />
+            <Input label={editItem.type==="income"?"付款方/来源":"收款方"} value={editItem.counterparty}
+              onChange={v=>setEditItem({...editItem,counterparty:v})} required placeholder={editItem.type==="income"?"客户名称/股东姓名/买家":"供应商/果农/员工"} />
+            <Input label="金额 (VND)" type="number" value={editItem.amount} onChange={v=>setEditItem({...editItem,amount:v})} required suffix="₫" />
+            <Input label="支付方式" value={editItem.method} onChange={v=>setEditItem({...editItem,method:v})} options={methodOptions} />
+            <Input label="单据/凭证号" value={editItem.refNo} onChange={v=>setEditItem({...editItem,refNo:v})} placeholder="转账单号/收据编号" />
+            <Input label="关联单号" value={editItem.relatedId} onChange={v=>setEditItem({...editItem,relatedId:v})} placeholder="关联柜号/采购批次等" />
+          </div>
+          <Input label="备注" type="textarea" value={editItem.notes} onChange={v=>setEditItem({...editItem,notes:v})} placeholder="补充说明..." />
+          {editItem.amount&&<div style={{background:"#f8f9fa",borderRadius:8,padding:12,fontSize:14,textAlign:"center",fontWeight:700,color:editItem.type==="income"?"#27ae60":"#e74c3c"}}>
+            {editItem.type==="income"?"收入":"支出"}金额：{fmtVND(parseFloat(editItem.amount)||0)}
+          </div>}
+          <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginTop:16}}>
+            <Btn variant="secondary" onClick={()=>setShowForm(false)}>取消</Btn>
+            <Btn variant={editItem.type==="income"?"success":"danger"} onClick={saveFn}>确认{editItem.type==="income"?"收款":"付款"}</Btn>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+};
+
+// ═══════════════════════════════════════════════════════
+// Salary Module 工资考勤 Bảng lương & Chấm công
+// ═══════════════════════════════════════════════════════
+const SalaryModule = ({ data, setData, role }) => {
+  const [tab,setTab]=useState("payroll");
+  const [showForm,setShowForm]=useState(false);
+  const [editItem,setEditItem]=useState(null);
+  const [selMonth,setSelMonth]=useState(today().slice(0,7));
+  const canEdit=ROLES[role]?.level>=2;
+  const records=data.salaryRecords||[];
+
+  const daysInMonth=(ym)=>{const [y,m]=ym.split("-").map(Number);return new Date(y,m,0).getDate();};
+
+  const empty={id:"",month:selMonth,staffId:"",staffName:"",dept:"office",baseSalary:"",workDays:"",
+    allowResp:"",allowMeal:"",allowPhone:"",allowFuel:"",
+    siRate:0,hiRate:0,uiRate:0,
+    siEmp:0,hiEmp:0,uiEmp:0,
+    bonus:"",deduction:"",notes:""};
+
+  const openNew=()=>{setEditItem({...empty,id:genId(),month:selMonth});setShowForm(true);};
+  const openEdit=r=>{setEditItem({...r});setShowForm(true);};
+
+  const calc=(item)=>{
+    const n=k=>parseFloat(item[k])||0;
+    const dm=daysInMonth(item.month||selMonth);
+    const actualSalary=n("baseSalary")/dm*n("workDays");
+    const allowances=n("allowResp")+n("allowMeal")+n("allowPhone")+n("allowFuel");
+    const gross=actualSalary+allowances+n("bonus");
+    const siCompany=n("baseSalary")*n("siRate");
+    const hiCompany=n("baseSalary")*n("hiRate");
+    const uiCompany=n("baseSalary")*n("uiRate");
+    const siEmp=n("baseSalary")*n("siEmp");
+    const hiEmp=n("baseSalary")*n("hiEmp");
+    const uiEmp=n("baseSalary")*n("uiEmp");
+    const totalInsCompany=siCompany+hiCompany+uiCompany;
+    const totalInsEmp=siEmp+hiEmp+uiEmp;
+    const net=gross-totalInsEmp-n("deduction");
+    return {actualSalary,allowances,gross,totalInsCompany,totalInsEmp,net,dm};
+  };
+
+  const saveFn=()=>{
+    const item={...editItem};
+    const c=calc(item);
+    item.actualSalary=c.actualSalary;item.grossSalary=c.gross;item.netSalary=c.net;
+    item.insCompany=c.totalInsCompany;item.insEmployee=c.totalInsEmp;
+    const list=[...records];const idx=list.findIndex(r=>r.id===item.id);
+    if(idx>=0)list[idx]=item;else list.push(item);
+    setData({...data,salaryRecords:list});save("df_sal",list);setShowForm(false);
+  };
+  const removeFn=id=>{if(!confirm("确认删除？"))return;const list=records.filter(r=>r.id!==id);setData({...data,salaryRecords:list});save("df_sal",list);};
+
+  const monthRecords=records.filter(r=>r.month===selMonth);
+  const totalGross=monthRecords.reduce((s,r)=>s+(r.grossSalary||0),0);
+  const totalNet=monthRecords.reduce((s,r)=>s+(r.netSalary||0),0);
+  const totalInsC=monthRecords.reduce((s,r)=>s+(r.insCompany||0),0);
+  const officeRecs=monthRecords.filter(r=>r.dept==="office");
+  const workerRecs=monthRecords.filter(r=>r.dept==="worker");
+
+  const months=[...new Set(records.map(r=>r.month))].sort().reverse();
+  if(!months.includes(selMonth))months.unshift(selMonth);
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+        <h2 style={{margin:0,fontSize:20,fontWeight:800,color:"#1B4332"}}>💼 工资管理 Bảng lương</h2>
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          <Input label="" value={selMonth} onChange={setSelMonth} type="month" style={{marginBottom:0,minWidth:150}} />
+          {canEdit&&<Btn onClick={openNew}>+ 添加工资条 Thêm lương</Btn>}
+        </div>
+      </div>
+
+      <div style={{display:"flex",gap:12,marginBottom:20,flexWrap:"wrap"}}>
+        <StatCard label="本月人数 Số NV" value={monthRecords.length} sub={`办公${officeRecs.length} 工人${workerRecs.length}`} />
+        <StatCard label="应发总额 Tổng lương" value={fmtVND(totalGross)} color="#2980b9" />
+        <StatCard label="实发总额 Thực lĩnh" value={fmtVND(totalNet)} color="#27ae60" />
+        {totalInsC>0&&<StatCard label="公司社保 BH DN" value={fmtVND(totalInsC)} color="#e67e22" />}
+      </div>
+
+      <Tabs tabs={[{key:"payroll",label:"工资表 Bảng lương"},{key:"office",label:"办公人员 VP"},{key:"worker",label:"加工工人 Thợ"}]} active={tab} onChange={setTab} />
+
+      {["payroll","office","worker"].includes(tab)&&<Card>
+        <Table columns={[
+          {title:"姓名 Họ tên",key:"staffName",render:v=><strong>{v}</strong>},
+          {title:"部门 BP",key:"dept",render:v=><Badge color={v==="office"?"#2980b9":"#e67e22"}>{v==="office"?"办公VP":"工人Thợ"}</Badge>},
+          {title:"出勤天 Ngày công",key:"workDays",align:"right"},
+          {title:"基本工资 Lương CB",key:"baseSalary",render:v=>fmtVND(v),align:"right"},
+          {title:"实际工资 Lương TT",key:"actualSalary",render:v=>fmtVND(v),align:"right"},
+          {title:"补贴 Phụ cấp",key:"id",render:(_,r)=>{const a=(parseFloat(r.allowResp)||0)+(parseFloat(r.allowMeal)||0)+(parseFloat(r.allowPhone)||0)+(parseFloat(r.allowFuel)||0);return a?fmtVND(a):"—";},align:"right"},
+          {title:"应发 Tổng",key:"grossSalary",render:v=><strong>{fmtVND(v)}</strong>,align:"right"},
+          {title:"个人社保 BH NV",key:"insEmployee",render:v=>v?fmtVND(v):"—",align:"right"},
+          {title:"实发 Thực lĩnh",key:"netSalary",render:v=><strong style={{color:"#27ae60"}}>{fmtVND(v)}</strong>,align:"right"},
+          {title:"操作",key:"id",align:"center",render:(_,row)=>canEdit?<div style={{display:"flex",gap:4,justifyContent:"center"}}><Btn size="sm" variant="ghost" onClick={e=>{e.stopPropagation();openEdit(row);}}>编辑</Btn><Btn size="sm" variant="danger" onClick={e=>{e.stopPropagation();removeFn(row.id);}}>删</Btn></div>:null},
+        ]} data={tab==="office"?officeRecs:tab==="worker"?workerRecs:monthRecords} emptyText={`${selMonth} 暂无工资记录`} />
+        {monthRecords.length>0&&<div style={{display:"flex",justifyContent:"flex-end",gap:24,marginTop:12,fontSize:13,fontWeight:700,paddingTop:8,borderTop:"2px solid #333"}}>
+          <span>应发合计: <span style={{color:"#2980b9"}}>{fmtVND(totalGross)}</span></span>
+          <span>实发合计: <span style={{color:"#27ae60"}}>{fmtVND(totalNet)}</span></span>
+        </div>}
+      </Card>}
+
+      {showForm&&editItem&&(
+        <Modal title={`工资条 Phiếu lương — ${editItem.month}`} onClose={()=>setShowForm(false)} width={700}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"0 16px"}}>
+            <Input label="月份 Tháng" type="month" value={editItem.month} onChange={v=>setEditItem({...editItem,month:v})} />
+            <Input label="姓名 Họ tên" value={editItem.staffName} onChange={v=>setEditItem({...editItem,staffName:v})} required />
+            <Input label="部门 Bộ phận" value={editItem.dept} onChange={v=>setEditItem({...editItem,dept:v})}
+              options={[{value:"office",label:"办公 Văn phòng"},{value:"worker",label:"加工工人 Thợ"}]} />
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"0 16px"}}>
+            <Input label="基本月薪 Lương CB (VND)" type="number" value={editItem.baseSalary} onChange={v=>setEditItem({...editItem,baseSalary:v})} suffix="₫" />
+            <Input label={`出勤天数 Ngày công (/${daysInMonth(editItem.month||selMonth)}天)`} type="number" value={editItem.workDays} onChange={v=>setEditItem({...editItem,workDays:v})} />
+            <div style={{display:"flex",alignItems:"flex-end",paddingBottom:14}}>
+              <span style={{fontSize:12,color:"#888"}}>实际工资=基本÷{daysInMonth(editItem.month||selMonth)}×出勤天</span>
+            </div>
+          </div>
+          <div style={{fontSize:13,fontWeight:700,color:"#1B4332",marginBottom:8}}>补贴 Phụ cấp / Trợ cấp</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:"0 12px"}}>
+            <Input label="责任 Trách nhiệm" type="number" value={editItem.allowResp} onChange={v=>setEditItem({...editItem,allowResp:v})} suffix="₫" />
+            <Input label="午餐 Ăn trưa" type="number" value={editItem.allowMeal} onChange={v=>setEditItem({...editItem,allowMeal:v})} suffix="₫" />
+            <Input label="电话 Điện thoại" type="number" value={editItem.allowPhone} onChange={v=>setEditItem({...editItem,allowPhone:v})} suffix="₫" />
+            <Input label="油费 Xăng" type="number" value={editItem.allowFuel} onChange={v=>setEditItem({...editItem,allowFuel:v})} suffix="₫" />
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 16px"}}>
+            <Input label="奖金 Thưởng" type="number" value={editItem.bonus} onChange={v=>setEditItem({...editItem,bonus:v})} suffix="₫" />
+            <Input label="扣款 Khấu trừ" type="number" value={editItem.deduction} onChange={v=>setEditItem({...editItem,deduction:v})} suffix="₫" />
+          </div>
+
+          {/* 社保 - 可选，不填则不参与计算 */}
+          <details style={{marginTop:8,marginBottom:8}}>
+            <summary style={{fontSize:12,color:"#888",cursor:"pointer",padding:"6px 0",userSelect:"none"}}>
+              📋 社保设置（可选）Bảo hiểm (tùy chọn) — 不填则不纳入核算，有实缴数据再填写
+            </summary>
+            <div style={{background:"#f8f9fa",borderRadius:8,padding:12,marginTop:6}}>
+              <div style={{fontSize:11,color:"#999",marginBottom:8}}>越南标准: 公司21.5%(社保17.5%+医保3%+失业1%) / 个人10.5%(社保8%+医保1.5%+失业1%)</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"0 12px"}}>
+                <Input label="公司社保% BHXH DN" type="number" value={editItem.siRate?editItem.siRate*100:""} onChange={v=>setEditItem({...editItem,siRate:v?(parseFloat(v)/100):0})} suffix="%" placeholder="17.5" />
+                <Input label="公司医保% BHYT DN" type="number" value={editItem.hiRate?editItem.hiRate*100:""} onChange={v=>setEditItem({...editItem,hiRate:v?(parseFloat(v)/100):0})} suffix="%" placeholder="3" />
+                <Input label="公司失业% BHTN DN" type="number" value={editItem.uiRate?editItem.uiRate*100:""} onChange={v=>setEditItem({...editItem,uiRate:v?(parseFloat(v)/100):0})} suffix="%" placeholder="1" />
+                <Input label="个人社保% BHXH NV" type="number" value={editItem.siEmp?editItem.siEmp*100:""} onChange={v=>setEditItem({...editItem,siEmp:v?(parseFloat(v)/100):0})} suffix="%" placeholder="8" />
+                <Input label="个人医保% BHYT NV" type="number" value={editItem.hiEmp?editItem.hiEmp*100:""} onChange={v=>setEditItem({...editItem,hiEmp:v?(parseFloat(v)/100):0})} suffix="%" placeholder="1.5" />
+                <Input label="个人失业% BHTN NV" type="number" value={editItem.uiEmp?editItem.uiEmp*100:""} onChange={v=>setEditItem({...editItem,uiEmp:v?(parseFloat(v)/100):0})} suffix="%" placeholder="1" />
+              </div>
+            </div>
+          </details>
+
+          {(()=>{const c=calc(editItem);return c.gross>0?(
+            <div style={{background:"#E8F5E9",borderRadius:8,padding:14,marginTop:8,fontSize:12,lineHeight:2}}>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:4}}>
+                <div>实际工资: <strong>{fmtVND(c.actualSalary)}</strong></div>
+                <div>补贴合计: <strong>{fmtVND(c.allowances)}</strong></div>
+                <div>应发总额: <strong style={{color:"#2980b9"}}>{fmtVND(c.gross)}</strong></div>
+                {c.totalInsCompany>0&&<div>公司社保: <strong>{fmtVND(c.totalInsCompany)}</strong></div>}
+                {c.totalInsEmp>0&&<div>个人社保: <strong>{fmtVND(c.totalInsEmp)}</strong></div>}
+                <div>实发金额: <strong style={{color:"#27ae60",fontSize:16}}>{fmtVND(c.net)}</strong></div>
+              </div>
+            </div>
+          ):null;})()}
+
+          <Input label="备注 Ghi chú" type="textarea" value={editItem.notes} onChange={v=>setEditItem({...editItem,notes:v})} style={{marginTop:8}} />
+          <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginTop:16}}><Btn variant="secondary" onClick={()=>setShowForm(false)}>取消</Btn><Btn onClick={saveFn}>保存</Btn></div>
+        </Modal>
+      )}
+    </div>
+  );
+};
+
+// ═══════════════════════════════════════════════════════
+// Profit Module 每柜利润核算 Lợi nhuận theo cont
+// ═══════════════════════════════════════════════════════
+const ProfitModule = ({ data, role }) => {
+  const isAdmin=role==="admin";
+  const containers=data.containers||[];
+
+  // Build profit data per container
+  const profitData=containers.map(c=>{
+    const rev=(c.loadedWeight||0)*15000; // 加工费
+    const loadFee=3000000; // 装车费
+    const totalRev=rev+loadFee;
+    // Costs: try to find linked payment records
+    const payments=data.payments||[];
+    const linked=payments.filter(p=>p.relatedId&&(p.relatedId===c.containerNo||p.relatedId===c.contSeq));
+    const linkedCost=linked.filter(p=>p.type==="expense").reduce((s,p)=>s+(p.amount||0),0);
+    // Estimated costs
+    const processingCost=(c.loadedWeight||0)*1600; // 场内加工
+    const boxCount=c.totalBoxes||0;
+    const boxCost=boxCount*29000; // 纸箱成本29000/箱
+    const estTotalCost=processingCost+boxCost;
+    const profit=totalRev-estTotalCost;
+    return {
+      ...c, revenue:totalRev, revProcessing:rev, revLoading:loadFee,
+      costProcessing:processingCost, costBox:boxCost, estTotalCost,
+      linkedCost, profit, profitRate:totalRev>0?profit/totalRev:0,
+    };
+  });
+
+  const totalRev=profitData.reduce((s,c)=>s+c.revenue,0);
+  const totalCost=profitData.reduce((s,c)=>s+c.estTotalCost,0);
+  const totalProfit=profitData.reduce((s,c)=>s+c.profit,0);
+
+  return (
+    <div>
+      <h2 style={{fontSize:20,fontWeight:800,color:"#1B4332",marginBottom:20}}>📈 每柜利润 Lợi nhuận theo cont</h2>
+
+      {!isAdmin&&<div style={{background:"#FFF3E0",borderRadius:8,padding:"10px 16px",marginBottom:16,fontSize:12,color:"#E65100"}}>
+        🔒 利润详情仅管理员可见 Chi tiết LN chỉ dành cho quản trị viên
+      </div>}
+
+      <div style={{display:"flex",gap:12,marginBottom:20,flexWrap:"wrap"}}>
+        <StatCard label="总柜数 Số cont" value={containers.length} />
+        {isAdmin&&<StatCard label="总营收 Doanh thu" value={fmtVND(totalRev)} color="#27ae60" />}
+        {isAdmin&&<StatCard label="总成本(估) Chi phí" value={fmtVND(totalCost)} color="#e74c3c" />}
+        {isAdmin&&<StatCard label="总利润 Lợi nhuận" value={fmtVND(totalProfit)} color={totalProfit>=0?"#1B4332":"#e74c3c"} />}
+        {isAdmin&&<StatCard label="平均利润率" value={totalRev>0?(totalProfit/totalRev*100).toFixed(1)+"%":"—"} color="#8e44ad" />}
+      </div>
+
+      <Card>
+        <div style={{background:"#f8f9fa",borderRadius:8,padding:"10px 14px",marginBottom:12,fontSize:11,color:"#666"}}>
+          成本估算: 加工费1,600₫/KG + 纸箱29,000₫/箱。实际成本请在财务模块关联柜号记录。
+        </div>
+        <Table columns={[
+          {title:"序号",key:"contSeq",render:v=><strong>{v||"—"}</strong>},
+          {title:"柜号 Số cont",key:"containerNo",render:v=><strong style={{fontFamily:"monospace"}}>{v||"—"}</strong>},
+          {title:"品牌",key:"brand"},
+          {title:"件数",key:"totalBoxes",align:"right"},
+          {title:"重量KG",key:"loadedWeight",align:"right",render:v=>v?v.toLocaleString():"—"},
+          ...(isAdmin?[
+            {title:"营收 DT",key:"revenue",align:"right",render:v=><strong style={{color:"#27ae60"}}>{fmtVND(v)}</strong>},
+            {title:"加工费成本",key:"costProcessing",align:"right",render:v=>fmtVND(v)},
+            {title:"纸箱成本",key:"costBox",align:"right",render:v=>fmtVND(v)},
+            {title:"估算成本 CP",key:"estTotalCost",align:"right",render:v=>fmtVND(v)},
+            {title:"利润 LN",key:"profit",align:"right",render:v=><strong style={{color:v>=0?"#27ae60":"#e74c3c"}}>{fmtVND(v)}</strong>},
+            {title:"利润率",key:"profitRate",align:"right",render:v=><span style={{color:v>=0?"#27ae60":"#e74c3c"}}>{(v*100).toFixed(1)}%</span>},
+          ]:[]),
+        ]} data={profitData} emptyText="暂无装车数据" />
+        {isAdmin&&profitData.length>0&&<div style={{display:"flex",justifyContent:"flex-end",gap:24,marginTop:12,fontSize:14,fontWeight:800,paddingTop:8,borderTop:"2px solid #333"}}>
+          <span>营收: <span style={{color:"#27ae60"}}>{fmtVND(totalRev)}</span></span>
+          <span>成本: <span style={{color:"#e74c3c"}}>{fmtVND(totalCost)}</span></span>
+          <span>利润: <span style={{color:totalProfit>=0?"#27ae60":"#e74c3c"}}>{fmtVND(totalProfit)}</span></span>
+        </div>}
+      </Card>
+    </div>
+  );
+};
+
+// ═══════════════════════════════════════════════════════
+// Nitrogen Freezing Module 液氮冷冻 Cấp đông Nito
+// ═══════════════════════════════════════════════════════
+const NitrogenModule = ({ data, setData, role }) => {
+  const [showForm,setShowForm]=useState(false);
+  const [editItem,setEditItem]=useState(null);
+  const canEdit=ROLES[role]?.level>=1;
+  const records=data.nitrogenRecords||[];
+
+  const empty={id:"",date:today(),clientCode:"",sourceType:"vendor",supplierName:"",
+    totalKG:"",abcKG:"",kemKG:"",haoKG:"",orchardKG:"",
+    cutPrice:"6000",cutTotal:"",
+    knockPrice:"",knockKG:"",knockTotal:"",
+    notes:""};
+
+  const openNew=()=>{setEditItem({...empty,id:genId()});setShowForm(true);};
+  const openEdit=r=>{setEditItem({...r});setShowForm(true);};
+
+  const calcN=(item)=>{
+    const n=k=>parseFloat(item[k])||0;
+    const cutTotal=n("abcKG")*n("cutPrice");
+    const knockTotal=n("knockKG")*n("knockPrice");
+    return {cutTotal,knockTotal,totalLabor:cutTotal+knockTotal};
+  };
+
+  const saveFn=()=>{
+    const item={...editItem};
+    const c=calcN(item);
+    item.cutTotal=c.cutTotal;item.knockTotal=c.knockTotal;item.totalLabor=c.totalLabor;
+    item.totalKG=parseFloat(item.totalKG)||0;
+    const list=[...records];const idx=list.findIndex(r=>r.id===item.id);
+    if(idx>=0)list[idx]=item;else list.push(item);
+    setData({...data,nitrogenRecords:list});save("df_nito",list);setShowForm(false);
+  };
+  const removeFn=id=>{if(!confirm("确认删除？"))return;const list=records.filter(r=>r.id!==id);setData({...data,nitrogenRecords:list});save("df_nito",list);};
+
+  const totalAllKG=records.reduce((s,r)=>s+(r.totalKG||0),0);
+  const totalCut=records.reduce((s,r)=>s+(r.cutTotal||0),0);
+  const totalKnock=records.reduce((s,r)=>s+(r.knockTotal||0),0);
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+        <h2 style={{margin:0,fontSize:20,fontWeight:800,color:"#1B4332"}}>🧊 液氮冷冻 Cấp đông Nito</h2>
+        {canEdit&&<Btn onClick={openNew}>+ 新增记录 Thêm</Btn>}
+      </div>
+
+      <div style={{display:"flex",gap:12,marginBottom:20,flexWrap:"wrap"}}>
+        <StatCard label="总采购量 Tổng KG" value={totalAllKG.toLocaleString()+" kg"} sub={`${records.length} 批次`} />
+        <StatCard label="砍果工资 Công cắt" value={fmtVND(totalCut)} color="#e67e22" sub="6,000₫/kg" />
+        <StatCard label="敲果工资 Công gõ" value={fmtVND(totalKnock)} color="#8e44ad" />
+        <StatCard label="人工合计 Tổng công" value={fmtVND(totalCut+totalKnock)} color="#e74c3c" />
+      </div>
+
+      <Card>
+        <Table columns={[
+          {title:"日期 Ngày",key:"date",nowrap:true},
+          {title:"客户 Khách",key:"clientCode",render:v=><strong>{v||"—"}</strong>},
+          {title:"来源",key:"sourceType",render:v=><Badge color={v==="vendor"?"#3498db":"#27ae60"}>{v==="vendor"?"买手Lái":"果园Vườn"}</Badge>},
+          {title:"总量KG",key:"totalKG",align:"right",render:v=>v?parseFloat(v).toLocaleString():"—"},
+          {title:"ABC(KG)",key:"abcKG",align:"right",render:v=>v?parseFloat(v).toLocaleString():"—"},
+          {title:"砍果工资",key:"cutTotal",align:"right",render:v=>v?fmtVND(v):"—"},
+          {title:"敲果KG",key:"knockKG",align:"right",render:v=>v?parseFloat(v).toLocaleString():"—"},
+          {title:"敲果工资",key:"knockTotal",align:"right",render:v=>v?fmtVND(v):"—"},
+          {title:"人工合计",key:"totalLabor",align:"right",render:v=>v?<strong style={{color:"#e74c3c"}}>{fmtVND(v)}</strong>:"—"},
+          {title:"操作",key:"id",align:"center",render:(_,row)=>canEdit?<div style={{display:"flex",gap:4,justifyContent:"center"}}><Btn size="sm" variant="ghost" onClick={e=>{e.stopPropagation();openEdit(row);}}>编辑</Btn><Btn size="sm" variant="danger" onClick={e=>{e.stopPropagation();removeFn(row.id);}}>删</Btn></div>:null},
+        ]} data={records} emptyText="暂无液氮冷冻记录" />
+      </Card>
+
+      {showForm&&editItem&&(
+        <Modal title="液氮冷冻记录 Phiếu cấp đông Nito" onClose={()=>setShowForm(false)} width={680}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"0 16px"}}>
+            <Input label="日期 Ngày" type="date" value={editItem.date} onChange={v=>setEditItem({...editItem,date:v})} required />
+            <Input label="客户号 Mã khách" value={editItem.clientCode} onChange={v=>setEditItem({...editItem,clientCode:v})} placeholder="Xe cậu / CONGTY / Tống" />
+            <Input label="来源 Nguồn" value={editItem.sourceType} onChange={v=>setEditItem({...editItem,sourceType:v})}
+              options={[{value:"vendor",label:"买手 Lái"},{value:"orchard",label:"果园 Vườn"}]} />
+          </div>
+          <div style={{fontSize:13,fontWeight:700,color:"#1B4332",marginBottom:8,marginTop:8}}>重量明细 Chi tiết KG</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:"0 12px"}}>
+            <Input label="采购总量 SL mua" type="number" value={editItem.totalKG} onChange={v=>setEditItem({...editItem,totalKG:v})} suffix="kg" />
+            <Input label="ABC重量 SL tính công" type="number" value={editItem.abcKG} onChange={v=>setEditItem({...editItem,abcKG:v})} suffix="kg" />
+            <Input label="烂果Kem" type="number" value={editItem.kemKG} onChange={v=>setEditItem({...editItem,kemKG:v})} suffix="kg" />
+            <Input label="损耗Hao" type="number" value={editItem.haoKG} onChange={v=>setEditItem({...editItem,haoKG:v})} suffix="kg" />
+          </div>
+          <div style={{fontSize:13,fontWeight:700,color:"#1B4332",marginBottom:8,marginTop:8}}>人工费 Công lao động</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"0 16px"}}>
+            <Input label="砍果单价 Giá cắt (₫/kg)" type="number" value={editItem.cutPrice} onChange={v=>setEditItem({...editItem,cutPrice:v})} suffix="₫/kg" />
+            <Input label="敲果重量 SL gõ (kg)" type="number" value={editItem.knockKG} onChange={v=>setEditItem({...editItem,knockKG:v})} suffix="kg" />
+            <Input label="敲果单价 Giá gõ (₫/kg)" type="number" value={editItem.knockPrice} onChange={v=>setEditItem({...editItem,knockPrice:v})} suffix="₫/kg" />
+          </div>
+
+          {(()=>{const c=calcN(editItem);return(c.cutTotal>0||c.knockTotal>0)?(
+            <div style={{background:"#E3F2FD",borderRadius:8,padding:14,marginTop:8,fontSize:13}}>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+                <div>砍果工资: <strong>{fmtVND(c.cutTotal)}</strong></div>
+                <div>敲果工资: <strong>{fmtVND(c.knockTotal)}</strong></div>
+                <div>人工合计: <strong style={{color:"#e74c3c",fontSize:16}}>{fmtVND(c.totalLabor)}</strong></div>
+              </div>
+            </div>
+          ):null;})()}
+
+          <Input label="备注 Ghi chú" type="textarea" value={editItem.notes} onChange={v=>setEditItem({...editItem,notes:v})} style={{marginTop:8}} placeholder="ABC数量/损耗明细/果园名等" />
+          <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginTop:16}}><Btn variant="secondary" onClick={()=>setShowForm(false)}>取消</Btn><Btn onClick={saveFn}>保存</Btn></div>
+        </Modal>
+      )}
+    </div>
+  );
+};
+
+// ═══════════════════════════════════════════════════════
+// Staff, Inventory, Asset, Settings Modules
+// ═══════════════════════════════════════════════════════
+const SimpleListModule = ({ title, emoji, dataKey, data, setData, role, fields, minLevel=1 }) => {
+  const [showForm,setShowForm]=useState(false);
+  const [editItem,setEditItem]=useState(null);
+  const canEdit=ROLES[role]?.level>=minLevel;
+  const items=data[dataKey]||[];
+  const emptyItem=Object.fromEntries(fields.map(f=>[f.key,f.default||""]));
+  const openNew=()=>{setEditItem({...emptyItem,id:genId()});setShowForm(true);};
+  const openEdit=item=>{setEditItem({...item});setShowForm(true);};
+  const saveFn=()=>{
+    const item={...editItem};fields.forEach(f=>{if(f.type==="number")item[f.key]=parseFloat(item[f.key])||0;});
+    const list=[...items];const idx=list.findIndex(i=>i.id===item.id);if(idx>=0)list[idx]=item;else list.push(item);
+    setData({...data,[dataKey]:list});save(SK[dataKey],list);setShowForm(false);
+  };
+  const removeFn=id=>{if(!confirm("确认删除？"))return;const list=items.filter(i=>i.id!==id);setData({...data,[dataKey]:list});save(SK[dataKey],list);};
+  const columns=fields.filter(f=>f.showInTable!==false).map(f=>({
+    title:f.label,key:f.key,align:f.align,nowrap:f.nowrap,
+    render:f.render||(f.type==="number"&&f.currency?v=>fmtVND(v):f.type==="number"&&f.unit?v=>v?v+" "+f.unit:"—":undefined),
+  }));
+  columns.push({title:"操作",key:"id",align:"center",render:(_,row)=>canEdit?<div style={{display:"flex",gap:4,justifyContent:"center"}}><Btn size="sm" variant="ghost" onClick={e=>{e.stopPropagation();openEdit(row);}}>编辑</Btn><Btn size="sm" variant="danger" onClick={e=>{e.stopPropagation();removeFn(row.id);}}>删</Btn></div>:null});
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+        <h2 style={{margin:0,fontSize:20,fontWeight:800,color:"#1B4332"}}>{emoji} {title}</h2>
+        {canEdit&&<Btn onClick={openNew}>+ 新增</Btn>}
+      </div>
+      <Card><Table columns={columns} data={items} /></Card>
+      {showForm&&editItem&&(
+        <Modal title={title} onClose={()=>setShowForm(false)}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 16px"}}>
+            {fields.map(f=><Input key={f.key} label={f.label} type={f.type==="number"?"number":f.type||"text"} value={editItem[f.key]||""} onChange={v=>setEditItem({...editItem,[f.key]:v})} options={f.options} suffix={f.suffix} placeholder={f.placeholder} />)}
+          </div>
+          <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginTop:16}}><Btn variant="secondary" onClick={()=>setShowForm(false)}>取消</Btn><Btn onClick={saveFn}>保存</Btn></div>
+        </Modal>
+      )}
+    </div>
+  );
+};
+
+const staffFields=[
+  {key:"name",label:"姓名 Họ tên"},{key:"position",label:"岗位 Vị trí",options:["保安 Bảo vệ","翻译 Phiên dịch","会计 Kế toán","厨师 Đầu bếp","技术员 Kỹ thuật","质检员 QC","仓管 Thủ kho","司机 Tài xế","搬运工 Bốc vác","清洁工 Vệ sinh"].map(v=>({value:v,label:v}))},
+  {key:"type",label:"类型 Loại",options:[{value:"permanent",label:"固定 Chính thức"},{value:"temporary",label:"临时 Thời vụ"}],render:v=><Badge color={v==="permanent"?"#2980b9":"#f39c12"}>{v==="permanent"?"固定":"临时"}</Badge>},
+  {key:"phone",label:"电话 SĐT"},{key:"salary",label:"月薪 Lương tháng (VND)",type:"number",currency:true,suffix:"₫"},
+  {key:"startDate",label:"入职日期 Ngày vào",type:"date",default:today()},
+  {key:"active",label:"状态 Trạng thái",default:"true",options:[{value:"true",label:"在岗 Đang làm"},{value:"false",label:"离岗 Nghỉ việc"}],render:v=><Badge color={v==="true"||v===true?"#27ae60":"#e74c3c"}>{v==="true"||v===true?"在岗":"离岗"}</Badge>},
+  {key:"notes",label:"备注 Ghi chú",showInTable:false},
+];
+const pkgFields=[
+  {key:"name",label:"名称 Tên"},{key:"category",label:"类别 Loại",options:[{value:"box",label:"纸箱 Thùng carton"},{value:"label",label:"品牌标签 Nhãn hiệu"},{value:"stem",label:"果柄标签 Nhãn cuống"},{value:"other",label:"其他 Khác"}],render:v=><Badge color={{box:"#2980b9",label:"#27ae60",stem:"#f39c12"}[v]||"#999"}>{{box:"纸箱",label:"标签",stem:"果柄",other:"其他"}[v]||v}</Badge>},
+  {key:"spec",label:"规格 Quy cách"},{key:"stock",label:"库存 Tồn kho",type:"number"},{key:"unit",label:"单位 ĐVT",default:"件"},
+  {key:"minStock",label:"最低库存 Tồn tối thiểu",type:"number",showInTable:false},{key:"unitPrice",label:"单价 Đơn giá (VND)",type:"number",currency:true,suffix:"₫"},
+];
+const chemFields=[
+  {key:"name",label:"药剂名称 Tên hóa chất"},{key:"type",label:"类型 Loại",options:[{value:"disinfectant",label:"消毒剂 Thuốc khử trùng"},{value:"cleaner",label:"清洁剂 Chất tẩy rửa"}],render:v=><Badge color={v==="disinfectant"?"#e74c3c":"#3498db"}>{v==="disinfectant"?"消毒剂":"清洁剂"}</Badge>},
+  {key:"spec",label:"规格 Quy cách"},{key:"batchNo",label:"批号 Số lô"},{key:"stock",label:"库存 Tồn kho",type:"number"},{key:"unit",label:"单位 ĐVT",default:"升"},
+  {key:"expiryDate",label:"有效期 Hạn sử dụng",type:"date"},{key:"supplier",label:"供应商 Nhà cung cấp"},
+];
+const assetFields=[
+  {key:"name",label:"资产名称 Tên tài sản"},{key:"category",label:"分类 Phân loại",options:["生产设备 Thiết bị SX","运输工具 Phương tiện","办公设备 Văn phòng","冷藏设备 Thiết bị lạnh","清洁设备 Vệ sinh","安防设备 An ninh","其他 Khác"].map(v=>({value:v,label:v}))},
+  {key:"serialNo",label:"编号 Mã số"},{key:"purchaseDate",label:"购置日期 Ngày mua",type:"date",default:today()},
+  {key:"purchasePrice",label:"购置价格 Giá mua (VND)",type:"number",currency:true,suffix:"₫"},{key:"location",label:"存放位置 Vị trí"},
+  {key:"status",label:"状态 Trạng thái",default:"active",options:[{value:"active",label:"在用 Đang dùng"},{value:"maintenance",label:"维修中 Đang sửa"},{value:"disposed",label:"已报废 Thanh lý"}],render:v=><Badge color={v==="active"?"#27ae60":v==="maintenance"?"#f39c12":"#e74c3c"}>{{active:"在用",maintenance:"维修中",disposed:"已报废"}[v]||v}</Badge>},
+];
+
+// Settings Module
+const SettingsModule = ({ data, setData, role, currentUser }) => {
+  const [showForm,setShowForm]=useState(false);
+  const [editItem,setEditItem]=useState(null);
+  const isAdmin=role==="admin";
+  const empty={id:"",username:"",password:"",name:"",role:"operator",active:true};
+  const openNew=()=>{setEditItem({...empty,id:genId()});setShowForm(true);};
+  const openEdit=u=>{setEditItem({...u});setShowForm(true);};
+  const saveFn=()=>{const list=[...(data.users||[])];const idx=list.findIndex(u=>u.id===editItem.id);if(idx>=0)list[idx]=editItem;else list.push(editItem);setData({...data,users:list});save(SK.users,list);setShowForm(false);};
+  const removeFn=(id)=>{
+    if(id===currentUser?.id){alert("不能删除当前登录账户 Không thể xóa tài khoản đang đăng nhập");return;}
+    const user=(data.users||[]).find(u=>u.id===id);
+    if(!confirm(`确认删除用户 "${user?.name||user?.username}" ？\nXác nhận xóa người dùng?`))return;
+    const list=(data.users||[]).filter(u=>u.id!==id);
+    setData({...data,users:list});save(SK.users,list);
+  };
+  return (
+    <div>
+      <h2 style={{fontSize:20,fontWeight:800,color:"#1B4332",marginBottom:20}}>⚙️ 系统设置/权限管理 Cài đặt hệ thống</h2>
+      <Card title="权限等级"><div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12}}>
+        {Object.entries(ROLES).map(([k,r])=><div key={k} style={{padding:14,borderRadius:10,border:`2px solid ${r.color}20`,background:`${r.color}08`}}>
+          <Badge color={r.color}>Level {r.level}</Badge> <strong style={{fontSize:13}}>{r.label}</strong>
+          <div style={{fontSize:11,color:"#666",marginTop:4}}>{k==="admin"?"全部权限+用户管理":k==="manager"?"果园/人员/资产/财务":k==="operator"?"采购/加工/装车/库存":"只读查看"}</div>
+        </div>)}
+      </div></Card>
+      <Card title="用户管理" actions={isAdmin?<Btn size="sm" onClick={openNew}>+ 添加用户</Btn>:null}>
+        <Table columns={[
+          {title:"用户名",key:"username",render:v=><strong style={{fontFamily:"monospace"}}>{v}</strong>},
+          {title:"姓名",key:"name"},{title:"角色",key:"role",render:v=><Badge color={ROLES[v]?.color}>{ROLES[v]?.label||v}</Badge>},
+          {title:"状态",key:"active",render:v=><Badge color={v?"#27ae60":"#e74c3c"}>{v?"启用":"禁用"}</Badge>},
+          {title:"操作",key:"id",align:"center",render:(_,row)=>isAdmin?<div style={{display:"flex",gap:4,justifyContent:"center"}}>
+            <Btn size="sm" variant="ghost" onClick={()=>openEdit(row)}>编辑</Btn>
+            <Btn size="sm" variant="danger" onClick={()=>removeFn(row.id)} disabled={row.id===currentUser?.id}>删除</Btn>
+          </div>:null},
+        ]} data={data.users||[]} />
+      </Card>
+      <Card title="系统参数" style={{marginTop:16}}><div style={{fontSize:13,lineHeight:2.2,color:"#555"}}>
+        加工费：<strong>15,000 VND/KG</strong>（成品装车实际重量）<br/>装车费：<strong>3,000,000 VND/柜</strong><br/>场内加工费：<strong>1,600 VND/KG</strong><br/>直采总成本：<strong>6,500 VND/KG</strong>（含采摘运输分级）<br/>意向金：<strong>20%</strong><br/>正常损耗：<strong>450-700 KG/货柜</strong><br/>45尺柜：<strong>~1,820件</strong>　50尺柜：<strong>~1,900件</strong><br/>箱规格：3颗/9KG, 3颗/9.5KG, 4颗/10KG, 5颗/10.5KG, 6颗/11KG, 7颗/11KG<br/>出口等级：<strong>A/B/C</strong>　内销剥肉：<strong>D</strong>
+      </div></Card>
+      {showForm&&editItem&&(
+        <Modal title="用户管理 Quản lý người dùng" onClose={()=>setShowForm(false)}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 16px"}}>
+            <Input label="用户名 Tên đăng nhập" value={editItem.username} onChange={v=>setEditItem({...editItem,username:v})} required />
+            <Input label="密码 Mật khẩu" value={editItem.password} onChange={v=>setEditItem({...editItem,password:v})} required />
+            <Input label="姓名 Họ tên" value={editItem.name} onChange={v=>setEditItem({...editItem,name:v})} required />
+            <Input label="角色 Vai trò" value={editItem.role} onChange={v=>setEditItem({...editItem,role:v})} options={Object.entries(ROLES).map(([k,r])=>({value:k,label:`${r.label}(L${r.level})`}))} />
+            <Input label="状态 Trạng thái" value={editItem.active===false?"false":"true"} onChange={v=>setEditItem({...editItem,active:v==="true"})}
+              options={[{value:"true",label:"启用 Hoạt động"},{value:"false",label:"禁用 Vô hiệu"}]} />
+          </div>
+          <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginTop:16}}><Btn variant="secondary" onClick={()=>setShowForm(false)}>取消</Btn><Btn onClick={saveFn}>保存</Btn></div>
+        </Modal>
+      )}
+    </div>
+  );
+};
+
+// ═══════════════════════════════════════════════════════
+// Login Screen
+// ═══════════════════════════════════════════════════════
+const LoginScreen = ({ onLogin, users }) => {
+  const [u,setU]=useState("");const [p,setP]=useState("");const [err,setErr]=useState("");
+  const go=()=>{const user=users.find(x=>x.username===u&&x.password===p&&x.active);if(user)onLogin(user);else setErr("用户名或密码错误");};
+  return (
+    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"linear-gradient(135deg,#1B4332 0%,#2D6A4F 40%,#40916C 100%)",fontFamily:"'Noto Sans SC','PingFang SC',-apple-system,sans-serif"}}>
+      <div style={{background:"#fff",borderRadius:20,padding:"48px 40px",width:380,boxShadow:"0 24px 80px rgba(0,0,0,0.25)"}}>
+        <div style={{textAlign:"center",marginBottom:32}}>
+          <div style={{fontSize:48,marginBottom:8}}>🥭</div>
+          <h1 style={{fontSize:20,fontWeight:800,color:"#1B4332",margin:0}}>宁晨公司</h1>
+          <p style={{fontSize:14,color:"#2D6A4F",marginTop:4,fontWeight:600}}>NINH THAN CTY</p>
+          <p style={{fontSize:13,color:"#555",marginTop:8}}>榴莲加工厂管理系统</p>
+          <p style={{fontSize:11,color:"#888",marginTop:2}}>Hệ thống Quản lý Nhà máy Chế biến Sầu riêng</p>
+        </div>
+        <Input label="用户名 Tên đăng nhập" value={u} onChange={v=>{setU(v);setErr("");}} placeholder="用户名" />
+        <Input label="密码 Mật khẩu" type="password" value={p} onChange={v=>{setP(v);setErr("");}} placeholder="密码" />
+        {err&&<div style={{color:"#e74c3c",fontSize:12,marginBottom:12,textAlign:"center"}}>{err}</div>}
+        <Btn onClick={go} style={{width:"100%",justifyContent:"center",padding:"12px 0",fontSize:15,marginTop:8}}>登 录</Btn>
+        <div style={{textAlign:"center",marginTop:24,fontSize:11,color:"#aaa"}}>admin/admin123 · manager/mgr123 · operator/op123</div>
+      </div>
+    </div>
+  );
+};
+
+// ═══════════════════════════════════════════════════════
+// Main App
+// ═══════════════════════════════════════════════════════
+const NAV=[
+  {key:"dashboard",label:"运营概览 Tổng quan",emoji:"📊",lv:0},
+  {key:"purchase",label:"收果管理 Thu mua",emoji:"🛒",lv:1},
+  {key:"orchard",label:"果园直采 Vườn trực tiếp",emoji:"🌴",lv:1},
+  {key:"process",label:"加工管理 Chế biến",emoji:"⚙️",lv:1},
+  {key:"container",label:"装车管理 Xuất cont",emoji:"🚛",lv:1},
+  {key:"nitrogen",label:"液氮冷冻 Cấp đông",emoji:"🧊",lv:1},
+  {key:"finance",label:"财务管理 Tài chính",emoji:"💰",lv:2},
+  {key:"salary",label:"工资管理 Bảng lương",emoji:"💼",lv:2},
+  {key:"profit",label:"利润核算 Lợi nhuận",emoji:"📈",lv:2},
+  {key:"staff",label:"人员管理 Nhân sự",emoji:"👥",lv:2},
+  {key:"packaging",label:"包材管理 Bao bì",emoji:"📦",lv:1},
+  {key:"chemicals",label:"药剂管理 Hóa chất",emoji:"🧪",lv:1},
+  {key:"assets",label:"固定资产 Tài sản",emoji:"🏗️",lv:2},
+  {key:"settings",label:"系统设置 Cài đặt",emoji:"⚙️",lv:3},
+];
+
+function App() {
+  const [user,setUser]=useState(null);
+  const [page,setPage]=useState("dashboard");
+  const [sideOpen,setSideOpen]=useState(true);
+  const [data,setData]=useState({
+    users:load(SK.users,DEFAULT_USERS),purchases:load(SK.purchases,[]),orchards:load(SK.orchards,[]),
+    batches:load(SK.batches,[]),containers:load(SK.containers,[]),staff:load(SK.staff,[]),
+    chemicals:load(SK.chemicals,[]),assets:load(SK.assets,[]),packaging:load(SK.packaging,[]),
+    payments:load(SK.payments,[]),
+    salaryRecords:load(SK.salaryRecords,[]),
+    nitrogenRecords:load(SK.nitrogenRecords,[]),
+  });
+  useEffect(()=>{const s=load(SK.session,null);if(s)setUser(s);},[]);
+  useEffect(()=>{if(!data.users||data.users.length===0){setData(d=>({...d,users:DEFAULT_USERS}));save(SK.users,DEFAULT_USERS);}},[]);
+  const login=u=>{setUser(u);save(SK.session,u);};
+  const logout=()=>{setUser(null);save(SK.session,null);setPage("dashboard");};
+
+  if(!user) return <LoginScreen onLogin={login} users={data.users||DEFAULT_USERS} />;
+  const lv=ROLES[user.role]?.level??0;
+  const visNav=NAV.filter(n=>lv>=n.lv);
+  const props={data,setData,role:user.role,currentUser:user};
+
+  const renderPage=()=>{
+    switch(page){
+      case "dashboard": return <DashboardModule {...props} />;
+      case "purchase": return <PurchaseModule {...props} />;
+      case "orchard": return <OrchardModule {...props} />;
+      case "process": return <ProcessModule {...props} />;
+      case "container": return <ContainerModule {...props} />;
+      case "finance": return <FinanceModule {...props} />;
+      case "salary": return <SalaryModule {...props} />;
+      case "profit": return <ProfitModule {...props} />;
+      case "nitrogen": return <NitrogenModule {...props} />;
+      case "staff": return <SimpleListModule title="人员管理 Quản lý nhân sự" emoji="👥" dataKey="staff" fields={staffFields} minLevel={2} {...props} />;
+      case "packaging": return <SimpleListModule title="包材管理 Quản lý bao bì" emoji="📦" dataKey="packaging" fields={pkgFields} {...props} />;
+      case "chemicals": return <SimpleListModule title="药剂管理 Quản lý hóa chất" emoji="🧪" dataKey="chemicals" fields={chemFields} {...props} />;
+      case "assets": return <SimpleListModule title="固定资产 Quản lý tài sản" emoji="🏗️" dataKey="assets" fields={assetFields} minLevel={2} {...props} />;
+      case "settings": return <SettingsModule {...props} />;
+      default: return <DashboardModule {...props} />;
+    }
+  };
+
+  return (
+    <div style={{display:"flex",minHeight:"100vh",fontFamily:"'Noto Sans SC','PingFang SC',-apple-system,sans-serif",background:"#f4f5f7",color:"#333"}}>
+      <div style={{width:sideOpen?220:60,minHeight:"100vh",background:"linear-gradient(180deg,#1B4332 0%,#2D6A4F 100%)",transition:"width .25s",overflow:"hidden",flexShrink:0,display:"flex",flexDirection:"column"}}>
+        <div style={{padding:sideOpen?"20px 18px":"20px 12px",borderBottom:"1px solid rgba(255,255,255,0.1)",display:"flex",alignItems:"center",gap:10,cursor:"pointer"}} onClick={()=>setSideOpen(!sideOpen)}>
+          <span style={{fontSize:28}}>🥭</span>
+          {sideOpen&&<div><div style={{color:"#fff",fontSize:14,fontWeight:800,lineHeight:1.2}}>宁晨公司</div><div style={{color:"rgba(255,255,255,0.6)",fontSize:10,fontWeight:600}}>NINH THAN CTY</div></div>}
+        </div>
+        <nav style={{flex:1,padding:"12px 8px"}}>
+          {visNav.map(item=>{const isA=page===item.key;return(
+            <button key={item.key} onClick={()=>setPage(item.key)} style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:sideOpen?"10px 12px":"10px 14px",background:isA?"rgba(255,255,255,0.15)":"transparent",border:"none",borderRadius:8,cursor:"pointer",color:isA?"#fff":"rgba(255,255,255,0.65)",fontSize:13,fontWeight:isA?700:500,transition:"all .15s",marginBottom:2,textAlign:"left"}}
+              onMouseEnter={e=>!isA&&(e.currentTarget.style.background="rgba(255,255,255,0.08)")} onMouseLeave={e=>!isA&&(e.currentTarget.style.background="transparent")}>
+              <span style={{fontSize:16}}>{item.emoji}</span>{sideOpen&&<span>{item.label}</span>}
+            </button>
+          );})}
+        </nav>
+        <div style={{padding:"12px 8px",borderTop:"1px solid rgba(255,255,255,0.1)"}}>
+          <button onClick={logout} style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"10px 12px",background:"rgba(255,255,255,0.05)",border:"none",borderRadius:8,cursor:"pointer",color:"rgba(255,255,255,0.6)",fontSize:12,textAlign:"left"}}>
+            🚪{sideOpen&&<span>退出登录 Đăng xuất</span>}
+          </button>
+        </div>
+      </div>
+      <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
+        <header style={{background:"#fff",padding:"12px 24px",borderBottom:"1px solid #e9ecef",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div style={{fontSize:11,color:"#888"}}>{new Date().toLocaleDateString("zh-CN",{year:"numeric",month:"long",day:"numeric",weekday:"long"})}</div>
+          <div style={{display:"flex",alignItems:"center",gap:12}}><Badge color={ROLES[user.role]?.color}>{ROLES[user.role]?.label}</Badge><span style={{fontSize:13,fontWeight:600}}>{user.name}</span></div>
+        </header>
+        <main style={{flex:1,padding:24,overflowY:"auto"}}>{renderPage()}</main>
+      </div>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700;800;900&display=swap');*{box-sizing:border-box;}body{margin:0;}::-webkit-scrollbar{width:6px;}::-webkit-scrollbar-track{background:transparent;}::-webkit-scrollbar-thumb{background:#ccc;border-radius:3px;}input:focus,select:focus,textarea:focus{border-color:#1B4332!important;box-shadow:0 0 0 3px rgba(27,67,50,0.1);}`}</style>
+    </div>
+  );
+}
+ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App));
+</script>
+</body>
+</html>
