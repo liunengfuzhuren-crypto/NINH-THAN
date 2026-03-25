@@ -23,14 +23,12 @@
     <div style="font-size:12px;opacity:0.7;margin-top:6px;">系统加载中 Đang tải hệ thống...</div>
   </div>
 </div>
-
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
-
 <script type="text/babel">
-const { useState, useEffect, useCallback, useRef } = React;
+const { useState, useEffect, useCallback, useRef, useMemo } = React;
 
 const fmtVND = (v) => v == null ? "—" : new Intl.NumberFormat("vi-VN").format(Math.round(v)) + " ₫";
 const fmtKG = (v) => v != null ? v.toFixed(1) + " kg" : "—";
@@ -45,15 +43,31 @@ const ROLES = {
   viewer: { label: "查看员", level: 0, color: "#7f8c8d" },
 };
 const GRADE_COLORS = { A: "#27ae60", B: "#2980b9", C: "#f39c12", D: "#e74c3c" };
+// Factory brands
+const BRANDS = [
+  {value:"Dole",label:"都乐 Dole"},
+  {value:"Dachangdao",label:"戴场岛 Đảo"},
+  {value:"Maojiaoya",label:"猫脚丫 Mèo"},
+  {value:"Guangyuan",label:"广源 Quảng Nguyên"},
+  {value:"Huasheng",label:"华盛 Huasheng"},
+  {value:"Chuhuafeng",label:"楚华丰 Chuhuafeng"},
+  {value:"other",label:"其他 Khác"},
+];
 const DEFAULT_USERS = [
   { id: "a1", username: "admin", password: "admin123", name: "系统管理员", role: "admin", active: true },
   { id: "m1", username: "manager", password: "mgr123", name: "工厂经理", role: "manager", active: true },
   { id: "o1", username: "operator", password: "op123", name: "操作员A", role: "operator", active: true },
 ];
 
-const SK = { users:"df_u", purchases:"df_p", orchards:"df_o", batches:"df_b", containers:"df_c", staff:"df_s", chemicals:"df_ch", assets:"df_as", packaging:"df_pk", payments:"df_pay", salaryRecords:"df_sal", nitrogenRecords:"df_nito", session:"df_ss" };
+const SK = { users:"df_u", purchases:"df_p", orchards:"df_o", batches:"df_b", containers:"df_c", staff:"df_s", chemicals:"df_ch", assets:"df_as", packaging:"df_pk", payments:"df_pay", salaryRecords:"df_sal", nitrogenRecords:"df_nito", loginLogs:"df_logs", session:"df_ss" };
 const load = (k, fb=[]) => { try { const d = localStorage.getItem(k); return d ? JSON.parse(d) : fb; } catch { return fb; } };
 const save = (k, d) => { try { localStorage.setItem(k, JSON.stringify(d)); } catch {} };
+// Ownership check: admin can edit all; others only their own
+const canUserEdit = (role, userId, record) => {
+  if(ROLES[role]?.level >= 3) return true; // admin edits all
+  if(!record?.createdBy) return true; // legacy records without owner
+  return record.createdBy === userId;
+};
 
 // ── UI Components ──
 const Badge = ({ children, color = "#6c757d" }) => (
@@ -238,7 +252,7 @@ const PrintTemplate = ({ container, onClose }) => {
 // ═══════════════════════════════════════════════════════
 // Container Module (装车管理) - with full template fields
 // ═══════════════════════════════════════════════════════
-const ContainerModule = ({ data, setData, role }) => {
+const ContainerModule = ({ data, setData, role, currentUser }) => {
   const [showForm, setShowForm] = useState(false);
   const [editItem, setEditItem] = useState(null);
   const [showPrint, setShowPrint] = useState(null);
@@ -291,17 +305,66 @@ const ContainerModule = ({ data, setData, role }) => {
 
   const saveFn = () => {
     const item = {...editItem};
+    if(!item.createdBy) item.createdBy=currentUser?.id;
+    item.lastEditBy=currentUser?.id;
     const totalBoxes = (item.items||[]).reduce((s,i)=>s+(parseInt(i.qty)||0),0);
     const totalKG = (item.items||[]).reduce((s,i)=>s+(parseInt(i.qty)||0)*(parseFloat(i.kgPerBox)||0),0);
     item.totalBoxes = totalBoxes;
     item.loadedWeight = totalKG;
     item.processingFee = totalKG * 15000;
     item.totalFee = item.processingFee + (item.loadingFee||3000000);
+
     const list = [...data.containers];
     const idx = list.findIndex(c=>c.id===item.id);
+    const isNew = idx < 0;
+    const wasCompleted = idx >= 0 && list[idx].status === "completed";
     if(idx>=0) list[idx]=item; else list.push(item);
-    setData({...data, containers:list});
+
+    // ── Auto-deduct packaging & chemicals when status becomes "completed" ──
+    let updatedPkg = [...(data.packaging||[])];
+    let updatedChem = [...(data.chemicals||[])];
+    if(item.status === "completed" && !wasCompleted && totalBoxes > 0) {
+      // Deduct boxes matching brand
+      updatedPkg = updatedPkg.map(p => {
+        if(p.category === "box" && p.status !== "paused") {
+          // Match brand in name or deduct from generic
+          const nameMatch = item.brand && p.name && (p.name.toLowerCase().includes(item.brand.toLowerCase()) || p.brand === item.brand);
+          const isGeneric = !p.brand && !BRANDS.some(b => p.name?.toLowerCase().includes(b.value.toLowerCase()));
+          if(nameMatch || isGeneric) {
+            return {...p, stock: Math.max(0, (p.stock||0) - totalBoxes)};
+          }
+        }
+        return p;
+      });
+      // Deduct brand labels (1 per box)
+      updatedPkg = updatedPkg.map(p => {
+        if(p.category === "label" && p.status !== "paused") {
+          const nameMatch = item.brand && p.name && (p.name.toLowerCase().includes(item.brand.toLowerCase()) || p.brand === item.brand);
+          if(nameMatch) return {...p, stock: Math.max(0, (p.stock||0) - totalBoxes)};
+        }
+        return p;
+      });
+      // Deduct stem labels (1 per box * fruits per box avg ~4)
+      updatedPkg = updatedPkg.map(p => {
+        if(p.category === "stem" && p.status !== "paused") {
+          const stemCount = totalBoxes * 4; // avg 4 fruits per box
+          return {...p, stock: Math.max(0, (p.stock||0) - stemCount)};
+        }
+        return p;
+      });
+      // Deduct chemicals: 1 bag(1kg) per container
+      updatedChem = updatedChem.map(c => {
+        if(c.status !== "paused") {
+          return {...c, stock: Math.max(0, (c.stock||0) - 1)};
+        }
+        return c;
+      });
+    }
+
+    setData({...data, containers:list, packaging:updatedPkg, chemicals:updatedChem});
     save(SK.containers, list);
+    save(SK.packaging, updatedPkg);
+    save(SK.chemicals, updatedChem);
     setShowForm(false);
   };
 
@@ -418,7 +481,8 @@ const ContainerModule = ({ data, setData, role }) => {
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"0 16px"}}>
             <Input label="CONT序号" value={editItem.contSeq} onChange={v=>setEditItem({...editItem,contSeq:v})} placeholder="1, 2, 3..." />
             <Input label="柜号 Số cont" value={editItem.containerNo} onChange={v=>setEditItem({...editItem,containerNo:v})} required placeholder="CICU 7635273" />
-            <Input label="品牌 牌子" value={editItem.brand} onChange={v=>setEditItem({...editItem,brand:v})} placeholder="Huasheng / Chuhuafeng" />
+            <Input label="品牌 牌子" value={editItem.brand} onChange={v=>setEditItem({...editItem,brand:v})}
+              options={BRANDS} />
           </div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"0 16px"}}>
             <Input label="车头号 Đầu xe" value={editItem.truckHead} onChange={v=>setEditItem({...editItem,truckHead:v})} placeholder="98H-02676" />
@@ -526,13 +590,14 @@ const DashboardModule = ({ data }) => {
 // Purchase Module - 收果管理 Quản lý thu mua (重构版)
 // 完全匹配收果账单实际结构
 // ═══════════════════════════════════════════════════════
-const PurchaseModule = ({ data, setData, role }) => {
+const PurchaseModule = ({ data, setData, role, currentUser }) => {
   const [showForm,setShowForm]=useState(false);
   const [editItem,setEditItem]=useState(null);
   const [tab,setTab]=useState("list");
   const [filterClient,setFilterClient]=useState("all");
   const [filterSource,setFilterSource]=useState("all");
   const canEdit=ROLES[role]?.level>=1;
+  const isAdmin=ROLES[role]?.level>=3;
 
   const empty={
     id:"", date:today(),
@@ -583,12 +648,13 @@ const PurchaseModule = ({ data, setData, role }) => {
 
   const saveFn=()=>{
     const item={...editItem};
+    if(!item.createdBy) item.createdBy=currentUser?.id; // stamp creator on new records
+    item.lastEditBy=currentUser?.id; item.lastEditTime=new Date().toLocaleString("zh-CN");
     const calc=calcTotal(item);
     item.totalKG=calc.totalKG;
     item.totalAmount=calc.amount;
     item.commissionTotal=calc.commTotal;
     if(!item.actualPaid) item.actualPaid=calc.actualPaid;
-    // Grades summary for dashboard compatibility
     item.netWeight=calc.totalKG;
     item.grades={A:parseFloat(item.gradeA)||0,B:parseFloat(item.gradeB)||0,C:parseFloat(item.gradeC)||0,D:(parseFloat(item.gradeD)||0)+(parseFloat(item.gradeDMeat)||0)};
     item.totalCost=calc.amount;
@@ -597,7 +663,12 @@ const PurchaseModule = ({ data, setData, role }) => {
     if(idx>=0) list[idx]=item; else list.push(item);
     setData({...data,purchases:list});save(SK.purchases,list);setShowForm(false);
   };
-  const removeFn=id=>{if(!confirm("确认删除？Xác nhận xóa?"))return;const list=data.purchases.filter(p=>p.id!==id);setData({...data,purchases:list});save(SK.purchases,list);};
+  const removeFn=id=>{
+    const record=data.purchases.find(p=>p.id===id);
+    if(!canUserEdit(role,currentUser?.id,record)){alert("无权删除他人记录 Không có quyền xóa");return;}
+    if(!confirm("确认删除？Xác nhận xóa?"))return;
+    const list=data.purchases.filter(p=>p.id!==id);setData({...data,purchases:list});save(SK.purchases,list);
+  };
 
   const purchases=data.purchases||[];
   const clients=[...new Set(purchases.map(p=>p.clientCode).filter(Boolean))];
@@ -651,7 +722,12 @@ const PurchaseModule = ({ data, setData, role }) => {
           {title:"D/剥肉",key:"gradeD",align:"right",render:(v,r)=>{const d=(parseFloat(v)||0)+(parseFloat(r.gradeDMeat)||0);return d?d.toLocaleString():"";}},
           {title:"总量 Tổng",key:"totalKG",align:"right",render:v=><strong>{v?v.toLocaleString():""}</strong>},
           {title:"金额 Tiền",key:"totalAmount",align:"right",render:v=>v?fmtVND(v):"—"},
-          {title:"操作",key:"id",align:"center",render:(_,row)=>canEdit?<div style={{display:"flex",gap:4,justifyContent:"center"}}><Btn size="sm" variant="ghost" onClick={e=>{e.stopPropagation();openEdit(row);}}>编辑</Btn><Btn size="sm" variant="danger" onClick={e=>{e.stopPropagation();removeFn(row.id);}}>删</Btn></div>:null},
+          {title:"操作人",key:"createdBy",render:v=>{const u=(data.users||[]).find(x=>x.id===v);return u?<span style={{fontSize:11,color:"#888"}}>{u.name}</span>:<span style={{fontSize:11,color:"#ccc"}}>—</span>;}},
+          {title:"操作",key:"id",align:"center",render:(_,row)=>{
+            const mine=canUserEdit(role,currentUser?.id,row);
+            return canEdit&&mine?<div style={{display:"flex",gap:4,justifyContent:"center"}}><Btn size="sm" variant="ghost" onClick={e=>{e.stopPropagation();openEdit(row);}}>编辑</Btn><Btn size="sm" variant="danger" onClick={e=>{e.stopPropagation();removeFn(row.id);}}>删</Btn></div>
+            :canEdit&&!mine?<span style={{fontSize:10,color:"#ccc"}}>他人数据</span>:null;
+          }},
         ]} data={filtered} emptyText="暂无收果记录 Chưa có phiếu thu mua" />
       </Card>}
 
@@ -942,7 +1018,7 @@ const OrchardModule = ({ data, setData, role }) => {
 // ═══════════════════════════════════════════════════════
 // Process Module (加工管理)
 // ═══════════════════════════════════════════════════════
-const ProcessModule = ({ data, setData, role }) => {
+const ProcessModule = ({ data, setData, role, currentUser }) => {
   const [showForm,setShowForm]=useState(false);
   const [editItem,setEditItem]=useState(null);
   const canEdit=ROLES[role]?.level>=1;
@@ -951,7 +1027,8 @@ const ProcessModule = ({ data, setData, role }) => {
   const openNew=()=>{setEditItem({...empty,id:genId(),batchNo:"B"+Date.now().toString().slice(-6)});setShowForm(true);};
   const openEdit=b=>{setEditItem(JSON.parse(JSON.stringify(b)));setShowForm(true);};
   const saveFn=()=>{
-    const item={...editItem};item.rawWeight=parseFloat(item.rawWeight)||0;item.processedWeight=parseFloat(item.processedWeight)||0;item.loss=item.rawWeight-item.processedWeight;
+    const item={...editItem};if(!item.createdBy)item.createdBy=currentUser?.id;item.lastEditBy=currentUser?.id;
+    item.rawWeight=parseFloat(item.rawWeight)||0;item.processedWeight=parseFloat(item.processedWeight)||0;item.loss=item.rawWeight-item.processedWeight;
     const list=[...data.batches];const idx=list.findIndex(b=>b.id===item.id);if(idx>=0)list[idx]=item;else list.push(item);
     setData({...data,batches:list});save(SK.batches,list);setShowForm(false);
   };
@@ -1068,6 +1145,7 @@ const FinanceModule = ({ data, setData, role }) => {
 
   const saveFn=()=>{
     const item={...editItem,amount:parseFloat(editItem.amount)||0};
+    if(!item.createdBy) item.createdBy=currentUser?.id; item.lastEditBy=currentUser?.id;
     const list=[...payments];
     const idx=list.findIndex(p=>p.id===item.id);
     if(idx>=0)list[idx]=item;else list.push(item);
@@ -1372,6 +1450,7 @@ const SalaryModule = ({ data, setData, role }) => {
   const saveFn=()=>{
     const item={...editItem};
     const c=calc(item);
+    if(!item.createdBy)item.createdBy=currentUser?.id;item.lastEditBy=currentUser?.id;
     item.actualSalary=c.actualSalary;item.grossSalary=c.gross;item.netSalary=c.net;
     item.insCompany=c.totalInsCompany;item.insEmployee=c.totalInsEmp;
     const list=[...records];const idx=list.findIndex(r=>r.id===item.id);
@@ -1575,7 +1654,7 @@ const ProfitModule = ({ data, role }) => {
 // ═══════════════════════════════════════════════════════
 // Nitrogen Freezing Module 液氮冷冻 Cấp đông Nito
 // ═══════════════════════════════════════════════════════
-const NitrogenModule = ({ data, setData, role }) => {
+const NitrogenModule = ({ data, setData, role, currentUser }) => {
   const [showForm,setShowForm]=useState(false);
   const [editItem,setEditItem]=useState(null);
   const canEdit=ROLES[role]?.level>=1;
@@ -1600,6 +1679,7 @@ const NitrogenModule = ({ data, setData, role }) => {
   const saveFn=()=>{
     const item={...editItem};
     const c=calcN(item);
+    if(!item.createdBy)item.createdBy=currentUser?.id;item.lastEditBy=currentUser?.id;
     item.cutTotal=c.cutTotal;item.knockTotal=c.knockTotal;item.totalLabor=c.totalLabor;
     item.totalKG=parseFloat(item.totalKG)||0;
     const list=[...records];const idx=list.findIndex(r=>r.id===item.id);
@@ -1732,13 +1812,37 @@ const staffFields=[
 ];
 const pkgFields=[
   {key:"name",label:"名称 Tên"},{key:"category",label:"类别 Loại",options:[{value:"box",label:"纸箱 Thùng carton"},{value:"label",label:"品牌标签 Nhãn hiệu"},{value:"stem",label:"果柄标签 Nhãn cuống"},{value:"other",label:"其他 Khác"}],render:v=><Badge color={{box:"#2980b9",label:"#27ae60",stem:"#f39c12"}[v]||"#999"}>{{box:"纸箱",label:"标签",stem:"果柄",other:"其他"}[v]||v}</Badge>},
-  {key:"spec",label:"规格 Quy cách"},{key:"stock",label:"库存 Tồn kho",type:"number"},{key:"unit",label:"单位 ĐVT",default:"件"},
-  {key:"minStock",label:"最低库存 Tồn tối thiểu",type:"number",showInTable:false},{key:"unitPrice",label:"单价 Đơn giá (VND)",type:"number",currency:true,suffix:"₫"},
+  {key:"brand",label:"所属品牌 Nhãn hiệu",options:[{value:"",label:"通用/不限"},...BRANDS]},
+  {key:"spec",label:"规格 Quy cách"},
+  {key:"stock",label:"库存 Tồn kho",type:"number",render:(v,row)=>{
+    const s=parseFloat(v)||0; const warn=parseFloat(row?.warnStock)||6000; const crit=parseFloat(row?.critStock)||4000;
+    if(row?.status==="paused") return <span style={{color:"#999",textDecoration:"line-through"}}>{s.toLocaleString()} (已暂停)</span>;
+    if(s<=crit) return <span style={{color:"#fff",background:"#e74c3c",padding:"2px 8px",borderRadius:4,fontWeight:700}}>{s.toLocaleString()} ⛔</span>;
+    if(s<=warn) return <span style={{color:"#fff",background:"#f39c12",padding:"2px 8px",borderRadius:4,fontWeight:700}}>{s.toLocaleString()} ⚠️</span>;
+    return <span style={{fontWeight:600}}>{s.toLocaleString()}</span>;
+  }},
+  {key:"unit",label:"单位 ĐVT",default:"件"},
+  {key:"warnStock",label:"预警线 Cảnh báo",type:"number",default:"6000",placeholder:"6000"},
+  {key:"critStock",label:"紧急线 Khẩn cấp",type:"number",default:"4000",placeholder:"4000"},
+  {key:"status",label:"状态 Trạng thái",default:"active",options:[{value:"active",label:"正常 Hoạt động"},{value:"paused",label:"暂停合作 Tạm ngưng"}],render:v=>v==="paused"?<Badge color="#999">暂停</Badge>:<Badge color="#27ae60">正常</Badge>},
+  {key:"unitPrice",label:"单价 Đơn giá (VND)",type:"number",currency:true,suffix:"₫"},
 ];
 const chemFields=[
-  {key:"name",label:"药剂名称 Tên hóa chất"},{key:"type",label:"类型 Loại",options:[{value:"disinfectant",label:"消毒剂 Thuốc khử trùng"},{value:"cleaner",label:"清洁剂 Chất tẩy rửa"}],render:v=><Badge color={v==="disinfectant"?"#e74c3c":"#3498db"}>{v==="disinfectant"?"消毒剂":"清洁剂"}</Badge>},
-  {key:"spec",label:"规格 Quy cách"},{key:"batchNo",label:"批号 Số lô"},{key:"stock",label:"库存 Tồn kho",type:"number"},{key:"unit",label:"单位 ĐVT",default:"升"},
-  {key:"expiryDate",label:"有效期 Hạn sử dụng",type:"date"},{key:"supplier",label:"供应商 Nhà cung cấp"},
+  {key:"name",label:"药剂名称 Tên hóa chất",default:"自研药水 Thuốc tự pha"},
+  {key:"type",label:"类型 Loại",options:[{value:"disinfectant",label:"消毒剂 Thuốc khử trùng"},{value:"cleaner",label:"清洁剂 Chất tẩy rửa"}],render:v=><Badge color={v==="disinfectant"?"#e74c3c":"#3498db"}>{v==="disinfectant"?"消毒剂":"清洁剂"}</Badge>},
+  {key:"spec",label:"规格 Quy cách",default:"1袋1kg/柜"},
+  {key:"stock",label:"库存(袋) Tồn kho",type:"number",render:(v,row)=>{
+    const s=parseFloat(v)||0; const warn=parseFloat(row?.warnStock)||20; const crit=parseFloat(row?.critStock)||10;
+    if(row?.status==="paused") return <span style={{color:"#999"}}>{s} (暂停)</span>;
+    if(s<=crit) return <span style={{color:"#fff",background:"#e74c3c",padding:"2px 8px",borderRadius:4,fontWeight:700}}>{s} ⛔</span>;
+    if(s<=warn) return <span style={{color:"#fff",background:"#f39c12",padding:"2px 8px",borderRadius:4,fontWeight:700}}>{s} ⚠️</span>;
+    return <strong>{s}</strong>;
+  }},
+  {key:"unit",label:"单位 ĐVT",default:"袋"},
+  {key:"warnStock",label:"预警线 Cảnh báo",type:"number",default:"20",placeholder:"20"},
+  {key:"critStock",label:"紧急线 Khẩn cấp",type:"number",default:"10",placeholder:"10"},
+  {key:"status",label:"状态",default:"active",options:[{value:"active",label:"正常"},{value:"paused",label:"暂停"}],render:v=>v==="paused"?<Badge color="#999">暂停</Badge>:<Badge color="#27ae60">正常</Badge>},
+  {key:"supplier",label:"供应商 NCC"},
 ];
 const assetFields=[
   {key:"name",label:"资产名称 Tên tài sản"},{key:"category",label:"分类 Phân loại",options:["生产设备 Thiết bị SX","运输工具 Phương tiện","办公设备 Văn phòng","冷藏设备 Thiết bị lạnh","清洁设备 Vệ sinh","安防设备 An ninh","其他 Khác"].map(v=>({value:v,label:v}))},
@@ -1783,9 +1887,20 @@ const SettingsModule = ({ data, setData, role, currentUser }) => {
           </div>:null},
         ]} data={data.users||[]} />
       </Card>
-      <Card title="系统参数" style={{marginTop:16}}><div style={{fontSize:13,lineHeight:2.2,color:"#555"}}>
+      <Card title="系统参数 Thông số hệ thống" style={{marginTop:16}}><div style={{fontSize:13,lineHeight:2.2,color:"#555"}}>
         加工费：<strong>15,000 VND/KG</strong>（成品装车实际重量）<br/>装车费：<strong>3,000,000 VND/柜</strong><br/>场内加工费：<strong>1,600 VND/KG</strong><br/>直采总成本：<strong>6,500 VND/KG</strong>（含采摘运输分级）<br/>意向金：<strong>20%</strong><br/>正常损耗：<strong>450-700 KG/货柜</strong><br/>45尺柜：<strong>~1,820件</strong>　50尺柜：<strong>~1,900件</strong><br/>箱规格：3颗/9KG, 3颗/9.5KG, 4颗/10KG, 5颗/10.5KG, 6颗/11KG, 7颗/11KG<br/>出口等级：<strong>A/B/C</strong>　内销剥肉：<strong>D</strong>
       </div></Card>
+
+      {/* Login Log */}
+      {isAdmin&&<Card title="登录日志 Nhật ký đăng nhập" style={{marginTop:16}}>
+        <Table columns={[
+          {title:"时间 Thời gian",key:"time",nowrap:true},
+          {title:"用户名",key:"username",render:v=><strong style={{fontFamily:"monospace"}}>{v}</strong>},
+          {title:"姓名 Họ tên",key:"name"},
+          {title:"角色 Vai trò",key:"role",render:v=><Badge color={ROLES[v]?.color}>{ROLES[v]?.label||v}</Badge>},
+        ]} data={(data.loginLogs||[]).slice(0,50)} emptyText="暂无登录记录" />
+        {(data.loginLogs||[]).length>50&&<div style={{textAlign:"center",fontSize:11,color:"#999",marginTop:8}}>仅显示最近50条，共{data.loginLogs.length}条</div>}
+      </Card>}
       {showForm&&editItem&&(
         <Modal title="用户管理 Quản lý người dùng" onClose={()=>setShowForm(false)}>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 16px"}}>
@@ -1860,16 +1975,69 @@ function App() {
     payments:load(SK.payments,[]),
     salaryRecords:load(SK.salaryRecords,[]),
     nitrogenRecords:load(SK.nitrogenRecords,[]),
+    loginLogs:load(SK.loginLogs,[]),
   });
   useEffect(()=>{const s=load(SK.session,null);if(s)setUser(s);},[]);
   useEffect(()=>{if(!data.users||data.users.length===0){setData(d=>({...d,users:DEFAULT_USERS}));save(SK.users,DEFAULT_USERS);}},[]);
-  const login=u=>{setUser(u);save(SK.session,u);};
+  const login=u=>{
+    setUser(u);save(SK.session,u);
+    // Record login log
+    const logEntry={id:genId(),userId:u.id,username:u.username,name:u.name,role:u.role,time:new Date().toLocaleString("zh-CN"),timestamp:Date.now()};
+    const logs=[logEntry,...(data.loginLogs||[])].slice(0,500); // keep last 500
+    setData(d=>({...d,loginLogs:logs}));save(SK.loginLogs,logs);
+  };
   const logout=()=>{setUser(null);save(SK.session,null);setPage("dashboard");};
 
   if(!user) return <LoginScreen onLogin={login} users={data.users||DEFAULT_USERS} />;
   const lv=ROLES[user.role]?.level??0;
   const visNav=NAV.filter(n=>lv>=n.lv);
   const props={data,setData,role:user.role,currentUser:user};
+
+  // ── Global Inventory Alert System ──
+  const [dismissedAlerts,setDismissedAlerts]=useState({});
+  const inventoryAlerts=useMemo(()=>{
+    const alerts=[];
+    // Check packaging
+    (data.packaging||[]).forEach(p=>{
+      if(p.status==="paused") return; // paused items skip alerts
+      const stock=parseFloat(p.stock)||0;
+      const warn=parseFloat(p.warnStock)||6000;
+      const crit=parseFloat(p.critStock)||4000;
+      if(stock<=crit) alerts.push({id:`pkg-crit-${p.id}`,level:"critical",icon:"⛔",
+        msg:`${p.name}${p.brand?" ("+p.brand+")":""}`,
+        detail:`库存 ${stock.toLocaleString()} ${p.unit||"件"} 已低于紧急线 ${crit.toLocaleString()}！Tồn kho dưới mức khẩn cấp!`,
+        itemId:p.id, dataKey:"packaging"});
+      else if(stock<=warn) alerts.push({id:`pkg-warn-${p.id}`,level:"warning",icon:"⚠️",
+        msg:`${p.name}${p.brand?" ("+p.brand+")":""}`,
+        detail:`库存 ${stock.toLocaleString()} ${p.unit||"件"} 低于预警线 ${warn.toLocaleString()} Tồn kho thấp`,
+        itemId:p.id, dataKey:"packaging"});
+    });
+    // Check chemicals
+    (data.chemicals||[]).forEach(c=>{
+      if(c.status==="paused") return;
+      const stock=parseFloat(c.stock)||0;
+      const warn=parseFloat(c.warnStock)||20;
+      const crit=parseFloat(c.critStock)||10;
+      if(stock<=crit) alerts.push({id:`chem-crit-${c.id}`,level:"critical",icon:"⛔",
+        msg:`药水 ${c.name}`,detail:`库存 ${stock} ${c.unit||"袋"} 低于紧急线！Khẩn cấp!`,
+        itemId:c.id, dataKey:"chemicals"});
+      else if(stock<=warn) alerts.push({id:`chem-warn-${c.id}`,level:"warning",icon:"⚠️",
+        msg:`药水 ${c.name}`,detail:`库存 ${stock} ${c.unit||"袋"} 低于预警线 Tồn kho thấp`,
+        itemId:c.id, dataKey:"chemicals"});
+    });
+    return alerts;
+  },[data.packaging,data.chemicals]);
+
+  const activeAlerts=inventoryAlerts.filter(a=>!dismissedAlerts[a.id]);
+  const criticalAlerts=activeAlerts.filter(a=>a.level==="critical");
+
+  // Pause a brand/item (set status to paused, auto-dismisses alert)
+  const pauseItem=(alert)=>{
+    const key=alert.dataKey;
+    const list=[...(data[key]||[])];
+    const idx=list.findIndex(i=>i.id===alert.itemId);
+    if(idx>=0){list[idx]={...list[idx],status:"paused"};setData({...data,[key]:list});save(SK[key],list);}
+  };
 
   const renderPage=()=>{
     switch(page){
@@ -1917,13 +2085,57 @@ function App() {
           <div style={{fontSize:11,color:"#888"}}>{new Date().toLocaleDateString("zh-CN",{year:"numeric",month:"long",day:"numeric",weekday:"long"})}</div>
           <div style={{display:"flex",alignItems:"center",gap:12}}><Badge color={ROLES[user.role]?.color}>{ROLES[user.role]?.label}</Badge><span style={{fontSize:13,fontWeight:600}}>{user.name}</span></div>
         </header>
-        <main style={{flex:1,padding:24,overflowY:"auto"}}>{renderPage()}</main>
+        <main style={{flex:1,padding:24,overflowY:"auto"}}>
+          {/* ── Critical Alert Modal (blocks until handled) ── */}
+          {criticalAlerts.length>0&&<div style={{position:"fixed",inset:0,zIndex:2000,background:"rgba(0,0,0,0.6)",display:"flex",alignItems:"center",justifyContent:"center"}}>
+            <div style={{background:"#fff",borderRadius:16,padding:"32px",maxWidth:520,width:"90%",boxShadow:"0 20px 60px rgba(0,0,0,0.3)",border:"3px solid #e74c3c"}}>
+              <div style={{textAlign:"center",marginBottom:20}}>
+                <div style={{fontSize:48,marginBottom:8}}>🚨</div>
+                <h2 style={{margin:0,fontSize:20,fontWeight:800,color:"#e74c3c"}}>紧急库存警告 CẢNH BÁO KHẨN CẤP</h2>
+                <p style={{fontSize:12,color:"#888",marginTop:4}}>以下物资库存严重不足，请立即处理！</p>
+              </div>
+              {criticalAlerts.map(a=>(
+                <div key={a.id} style={{background:"#FDE8E8",borderRadius:10,padding:"12px 16px",marginBottom:10,border:"1px solid #f5c6cb"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+                    <div>
+                      <div style={{fontWeight:700,fontSize:14,color:"#c0392b"}}>{a.icon} {a.msg}</div>
+                      <div style={{fontSize:12,color:"#888",marginTop:2}}>{a.detail}</div>
+                    </div>
+                    <div style={{display:"flex",gap:6,flexShrink:0,marginLeft:8}}>
+                      <Btn size="sm" variant="danger" onClick={()=>pauseItem(a)}>暂停该品牌</Btn>
+                      <Btn size="sm" variant="secondary" onClick={()=>setDismissedAlerts(d=>({...d,[a.id]:true}))}>已知悉</Btn>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              <div style={{textAlign:"center",marginTop:16,fontSize:11,color:"#999"}}>
+                点击"已知悉"临时关闭（下次登录仍会提醒）| 点击"暂停该品牌"永久解除预警
+              </div>
+            </div>
+          </div>}
+
+          {/* ── Warning Banner (non-blocking) ── */}
+          {activeAlerts.filter(a=>a.level==="warning").length>0&&<div style={{background:"#FFF8E1",border:"1px solid #FFE082",borderRadius:10,padding:"12px 16px",marginBottom:16}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+              <span style={{fontWeight:700,fontSize:13,color:"#F57F17"}}>⚠️ 库存预警 Cảnh báo tồn kho ({activeAlerts.filter(a=>a.level==="warning").length})</span>
+            </div>
+            {activeAlerts.filter(a=>a.level==="warning").map(a=>(
+              <div key={a.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid #FFF0B3",fontSize:12}}>
+                <span><strong>{a.msg}</strong> — {a.detail}</span>
+                <div style={{display:"flex",gap:4,flexShrink:0}}>
+                  <Btn size="sm" variant="ghost" onClick={()=>pauseItem(a)} style={{fontSize:11}}>暂停</Btn>
+                  <Btn size="sm" variant="ghost" onClick={()=>setDismissedAlerts(d=>({...d,[a.id]:true}))} style={{fontSize:11}}>忽略</Btn>
+                </div>
+              </div>
+            ))}
+          </div>}
+
+          {renderPage()}
+        </main>
       </div>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700;800;900&display=swap');*{box-sizing:border-box;}body{margin:0;}::-webkit-scrollbar{width:6px;}::-webkit-scrollbar-track{background:transparent;}::-webkit-scrollbar-thumb{background:#ccc;border-radius:3px;}input:focus,select:focus,textarea:focus{border-color:#1B4332!important;box-shadow:0 0 0 3px rgba(27,67,50,0.1);}`}</style>
     </div>
   );
 }
 ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App));
-</script>
-</body>
-</html>
+</script></body></html>
